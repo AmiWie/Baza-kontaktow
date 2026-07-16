@@ -1,0 +1,21 @@
+# Środowisko wirtualne Pythona
+.venv/
+venv/
+ENV/
+
+# Pliki tymczasowe Pythona
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Pliki konfiguracyjne Streamlit
+.streamlit/secrets.toml
+
+# Pliki systemowe i konfiguracyjne edytorów
+.vscode/
+.idea/
+.DS_Store
+
+# Folder na wgrane przez użytkowników załączniki 
+uploads/
