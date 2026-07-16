@@ -10,10 +10,12 @@ import psycopg2
 
 
 def pobierz_polaczenie():
-    if "SUPABASE_URL" in st.secrets:
-        return psycopg2.connect(st.secrets["SUPABASE_URL"])
-    else:
-        return sqlite3.connect('database.db')
+    try:
+        if st.secrets is not None and "SUPABASE_URL" in st.secrets:
+            return psycopg2.connect(st.secrets["SUPABASE_URL"])
+    except Exception:
+        pass
+    return sqlite3.connect('database.db')
 
 def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do_szukania=None):
     conn = pobierz_polaczenie()
@@ -234,7 +236,7 @@ def aktualizuj_grant(id_grantu, nowy_status, nowy_link):
 
 
 # USER INTERFACE
-st.title("BAZA FR BEST Łódź")
+st.title("Baza Kontaktów i Współpracy")
 
 
 if 'wybrana_firma_id' not in st.session_state:
@@ -527,7 +529,7 @@ with tab_firmy:
 
 # dashboard
 with tab_dashboard:
-    st.header("Analiza Fundraisingu BEST Łódź")
+    st.header("Analiza Kontaktów i Współpracy")
     conn = sqlite3.connect('database.db')
     df_f = pd.read_sql_query("SELECT kategoria FROM Firma", conn)
     df_i = pd.read_sql_query("SELECT status, projekt FROM Interakcja", conn)
@@ -786,43 +788,3 @@ with tab_granty:
                 else:
                     st.error("Nazwa, instytucja oraz projekt są polami wymaganymi!")
     
-    # 3. SEKCJA: FORMULARZ DODAWANIA NOWEGO GRANTU
-    st.subheader("➕ Dodaj nowy wniosek grantowy / dofinansowanie")
-    
-    with st.form("formularz_nowego_grantu", clear_on_submit=True):
-        g_nazwa = st.text_input("Nazwa Grantu / Programu:")
-        g_instytucja = st.text_input("Instytucja przyznająca (np. Urząd Miasta):")
-        
-        col_form1, col_form2, col_form3 = st.columns(3)
-        with col_form1:
-            g_kwota = st.number_input("Wnioskowana kwota (PLN):", min_value=0.0, step=500.0, value=0.0)
-        with col_form2:
-            g_deadline = st.date_input("Termin złożenia (Deadline):", value=datetime.today())
-        with col_form3:
-            g_status = st.selectbox("Status początkowy:", ["W przygotowaniu", "Złożony", "Zaakceptowany", "Odrzucony"])
-            
-        g_projekt = st.text_input("Projekt:")
-        g_link = st.text_input("Link (opcjonalnie):", placeholder="https://...")
-        g_notatki = st.text_area("Dodatkowe uwagi (np. wymagane załączniki, kryteria):")
-        
-        submit_grant = st.form_submit_button("Zapisz wniosek grantowy")
-        
-        if submit_grant:
-            if g_nazwa and g_instytucja and g_projekt:
-                g_deadline_str = g_deadline.strftime("%Y-%m-%d")
-                
-                # Zapis do bazy danych
-                dodaj_grant(
-                    nazwa=g_nazwa,
-                    inst=g_instytucja,
-                    kwota=g_kwota,
-                    ddl=g_deadline_str,
-                    status=g_status,
-                    proj=g_projekt,
-                    notatki=g_notatki,
-                    link=g_link
-                )
-                st.toast(f"Pomyślnie zarejestrowano wniosek: {g_nazwa}")
-                st.rerun()
-            else:
-                st.error("Nazwa, instytucja oraz projekt są polami wymaganymi!")
