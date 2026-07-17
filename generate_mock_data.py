@@ -1,5 +1,5 @@
 # ten plik generuje fikcyjne dane do bazy danych SQLite dla tabel: 
-# Firma, Uzytkownik, OsobaKontaktowa, Interakcja i Grant
+# Firma, Uzytkownik, OsobaKontaktowa, Interakcja i Granty
 
 import sqlite3
 import random
@@ -89,7 +89,7 @@ def generuj_dane_testowe_grantow(liczba_grantow=12):
         deadline = ddl_date.strftime("%Y-%m-%d")
         
         cursor.execute("""
-            INSERT INTO Grant (nazwa, instytucja, kwota, deadline, status, projekt, notatki)
+            INSERT INTO Granty (nazwa, instytucja, kwota, deadline, status, projekt, notatki)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (nazwa, instytucja, kwota, deadline, status, projekt, notatki))
 

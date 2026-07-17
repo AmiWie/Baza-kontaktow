@@ -51,11 +51,11 @@ def pobierz_historie_interakcji(id_firmy):
     query = """
     SELECT 
         Interakcja.id,
-        Interakcja.data_interakcji AS 'Data', 
-        Uzytkownik.imie || ' ' || Uzytkownik.nazwisko AS 'Uzytkownik',
-        Interakcja.status AS 'Status', 
-        Interakcja.komentarz AS 'Komentarz', 
-        Interakcja.projekt AS 'Projekt',
+        Interakcja.data_interakcji AS "Data", 
+        Uzytkownik.imie || ' ' || Uzytkownik.nazwisko AS "Uzytkownik",
+        Interakcja.status AS "Status", 
+        Interakcja.komentarz AS "Komentarz", 
+        Interakcja.projekt AS "Projekt",
         Interakcja.sciezka_pliku
     FROM Interakcja
     JOIN Uzytkownik ON Interakcja.id_uzytkownika = Uzytkownik.id
@@ -97,9 +97,9 @@ def pobierz_osoby_kontaktowe(id_firmy):
     conn = pobierz_polaczenie()
     query = """
     SELECT 
-        OsobaKontaktowa.imie || ' ' || OsobaKontaktowa.nazwisko AS 'Osoba kontaktowa',
-        OsobaKontaktowa.email AS 'E-mail',
-        OsobaKontaktowa.telefon AS 'Telefon'
+        OsobaKontaktowa.imie || ' ' || OsobaKontaktowa.nazwisko AS "Osoba kontaktowa",
+        OsobaKontaktowa.email AS "E-mail",
+        OsobaKontaktowa.telefon AS "Telefon"
     FROM OsobaKontaktowa
     JOIN FirmaOsobaKontaktowa ON OsobaKontaktowa.id = FirmaOsobaKontaktowa.osoba_id
     WHERE FirmaOsobaKontaktowa.firma_id = ?
@@ -161,10 +161,10 @@ def pobierz_pilne_follow_upy(id_uzytkownika):
     conn = pobierz_polaczenie()
     query = """
     SELECT 
-        Interakcja.id AS 'id', 
-        Firma.nazwa AS 'Firma', 
-        Interakcja.kolejny_kontakt AS 'Termin', 
-        Interakcja.projekt AS 'Projekt'
+        Interakcja.id AS "id", 
+        Firma.nazwa AS "Firma", 
+        Interakcja.kolejny_kontakt AS "Termin", 
+        Interakcja.projekt AS "Projekt"
     FROM Interakcja
     JOIN Firma ON Interakcja.id_firmy = Firma.id
     WHERE Interakcja.id_uzytkownika = ? 
@@ -179,7 +179,7 @@ def pobierz_pilne_follow_upy(id_uzytkownika):
 
 def pobierz_granty(sortowanie_projekt=None):
     conn = pobierz_polaczenie()
-    query = "SELECT id, nazwa AS 'Nazwa Grantu', instytucja AS 'Instytucja', kwota AS 'Kwota (PLN)', deadline AS 'Deadline', status AS 'Status', projekt AS 'Projekt', notatki, link FROM Grant"
+    query = 'SELECT id, nazwa AS "Nazwa Grantu", instytucja AS "Instytucja", kwota AS \'Kwota (PLN)\', deadline AS \'Deadline\', status AS \'Status\', projekt AS \'Projekt\', notatki, link FROM Granty'
     if sortowanie_projekt and sortowanie_projekt != "Wszystkie":
         query += " WHERE projekt = ?"
         df = pd.read_sql_query(query, conn, params=(sortowanie_projekt,))
@@ -193,7 +193,7 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO Grant (nazwa, instytucja, kwota, deadline, status, projekt, notatki, link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO Granty (nazwa, instytucja, kwota, deadline, status, projekt, notatki, link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (nazwa, inst, kwota, ddl, status, proj, notatki, link)
     )
     conn.commit()
@@ -202,7 +202,7 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
 def pobierz_unikalne_projekty_grantow():
     conn = pobierz_polaczenie()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Grant WHERE projekt IS NOT NULL AND projekt != ''", 
+        "SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL AND projekt != ''", 
         conn
     )
     conn.close()
@@ -211,7 +211,7 @@ def pobierz_unikalne_projekty_grantow():
 def usun_grant(id_grantu):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM Grant WHERE id = ?", (id_grantu,))
+    cursor.execute("DELETE FROM Granty WHERE id = ?", (id_grantu,))
     conn.commit()
     conn.close()
 
@@ -226,7 +226,7 @@ def aktualizuj_grant(id_grantu, nowy_status, nowy_link):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE Grant SET status = %s, link = %s WHERE id = %s", 
+        "UPDATE Granty SET status = %s, link = %s WHERE id = %s", 
         (nowy_status, nowy_link, id_grantu)
     )
     conn.commit()
