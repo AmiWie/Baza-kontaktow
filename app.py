@@ -513,19 +513,48 @@ with tab_firmy:
             st.session_state.wybrana_firma_nazwa = str(df_firmy.iloc[indeks_wiersza]['nazwa'])
             st.rerun()
 
-        st.subheader("➕ Dodaj nową firmę")
-        with st.form("Dodaj firmę", clear_on_submit=True):
-            nazwa = st.text_input("Nazwa firmy")
-            kategoria = st.selectbox("Kategoria", ["Sponsor", "Barter"])
-            submitted = st.form_submit_button("Dodaj firmę")
+        st.subheader("➕ Dodaj nową firmę i kontakt")
 
-            if submitted:
-                if nazwa:
-                    dodaj_firme(nazwa, kategoria)
-                    st.toast(f"Firma '{nazwa}' została dodana do bazy danych.")
-                    st.rerun()
-                else: 
-                    st.error("Nazwa firmy nie może być pusta.")
+with st.form("formularz_nowej_firmy_i_kontaktu", clear_on_submit=True):
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        f_nazwa = st.text_input("Nazwa firmy *")
+    with col_f2:
+        # Zakładam, że masz predefiniowane kategorie, dopasuj do swoich
+        f_kategoria = st.selectbox("Kategoria *", ["Sponsor", "Barter", "Inna"])
+        
+    st.markdown("---")
+    st.caption("👤 Dane osoby kontaktowej (Opcjonalnie – możesz zostawić puste)")
+    
+    col_o1, col_o2 = st.columns(2)
+    with col_o1:
+        o_imie = st.text_input("Imię:")
+        o_email = st.text_input("E-mail:")
+    with col_o2:
+        o_nazwisko = st.text_input("Nazwisko:")
+        o_telefon = st.text_input("Telefon:")
+        
+    submitted_all = st.form_submit_button("Zapisz wszystko")
+    
+    if submitted_all:
+        if f_nazwa:
+            nowe_id_firmy = dodaj_firme(f_nazwa, f_kategoria)
+            komunikat = f"Pomyślnie dodano firmę: {f_nazwa}"
+
+            if o_imie:
+                dodaj_osobe_kontaktowa(
+                    id_firmy=nowe_id_firmy,
+                    imie=o_imie,
+                    nazwisko=o_nazwisko,
+                    email=o_email,
+                    telefon=o_telefon
+                )
+                komunikat += f" wraz z kontaktem: {o_imie} {o_nazwisko}"
+            
+            st.success(komunikat)
+            st.rerun()
+        else:
+            st.error("Nazwa firmy jest wymagana!")
 
 
 # dashboard
