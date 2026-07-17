@@ -531,7 +531,7 @@ with tab_firmy:
 # dashboard
 with tab_dashboard:
     st.header("Analiza Kontaktów i Współpracy")
-    conn = sqlite3.connect('database.db')
+    conn = pobierz_polaczenie()
     df_f = pd.read_sql_query("SELECT kategoria FROM Firma", conn)
     df_i = pd.read_sql_query("SELECT status, projekt FROM Interakcja", conn)
     conn.close()
@@ -660,7 +660,7 @@ with tab_granty:
             grant_data = df_szczegoly.iloc[0]
             
             st.markdown(f"## 📜 Grant: {grant_data['Nazwa Grantu']}")
-            st.markdown(f"**Projekt BEST:** `{grant_data['Projekt']}` | **Instytucja:** *{grant_data['Instytucja']}*")
+            st.markdown(f"**Projekt:** `{grant_data['Projekt']}` | **Instytucja:** *{grant_data['Instytucja']}*")
             st.markdown(f"**Kwota:** `{grant_data['Kwota (PLN)']} PLN` | **Deadline (DDL):** `{grant_data['Deadline']}`")
             
             # Przycisk z linkiem
@@ -704,7 +704,7 @@ with tab_granty:
         with c_fil1:
             lista_proj_grantow = pobierz_unikalne_projekty_grantow()
             wybrany_proj_grant = st.selectbox(
-                "Filtruj po projekcie BEST:", 
+                "Filtruj po projekcie:", 
                 ["Wszystkie"] + lista_proj_grantow, 
                 key="filter_grant_proj"
             )
@@ -721,9 +721,9 @@ with tab_granty:
         
         # Logika sortowania w pamięci
         if not df_granty_widok.empty:
-            if kryterium_sortowania == "Najbliższy termin (Deadline)":
+            if kryterium_sortowania == "Najbliższy termin":
                 df_granty_widok = df_granty_widok.sort_values(by="Deadline", ascending=True)
-            elif kryterium_sortowania == "Statusie (Alfabetycznie)":
+            elif kryterium_sortowania == "Status":
                 df_granty_widok = df_granty_widok.sort_values(by="Status", ascending=True)
 
         if not df_granty_widok.empty:
@@ -765,7 +765,7 @@ with tab_granty:
             with col_form3:
                 g_status = st.selectbox("Status początkowy:", ["W przygotowaniu", "Złożony", "Zaakceptowany", "Odrzucony"])
                 
-            g_projekt = st.text_input("Projekt BEST Łódź (np. EBEC, Żongler):")
+            g_projekt = st.text_input("Projekt:")
             g_notatki = st.text_area("Dodatkowe uwagi (np. wymagane załączniki, kryteria):")
             g_link = st.text_input("Link do dokumentacji (opcjonalnie):", placeholder="https://...")
             
