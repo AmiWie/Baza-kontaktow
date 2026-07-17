@@ -52,7 +52,7 @@ def pobierz_historie_interakcji(id_firmy):
     SELECT 
         Interakcja.id,
         Interakcja.data_interakcji AS "Data", 
-        Uzytkownik.imie || ' ' || Uzytkownik.nazwisko AS "Uzytkownik",
+        CONCAT(Uzytkownik.imie, ' ', Uzytkownik.nazwisko) AS "Uzytkownik"
         Interakcja.status AS "Status", 
         Interakcja.komentarz AS "Komentarz", 
         Interakcja.projekt AS "Projekt",
@@ -68,7 +68,7 @@ def pobierz_historie_interakcji(id_firmy):
 
 def pobierz_uzytkownikow():
     conn = pobierz_polaczenie()
-    df = pd.read_sql_query("SELECT id, imie || ' ' || nazwisko AS nazwa FROM Uzytkownik", conn)
+    df = pd.read_sql_query("SELECT id, CONCAT(imie, ' ', nazwisko) AS nazwa FROM Uzytkownik", conn)
     conn.close()
     return df
 
@@ -87,7 +87,7 @@ def pobierz_unikalne_projekty():
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Interakcja WHERE projekt IS NOT NULL AND projekt != ''", 
+        "SELECT DISTINCT projekt FROM Interakcja WHERE projekt IS NOT NULL", 
         conn
     )
     conn.close()
@@ -97,7 +97,7 @@ def pobierz_osoby_kontaktowe(id_firmy):
     conn = pobierz_polaczenie()
     query = """
     SELECT 
-        OsobaKontaktowa.imie || ' ' || OsobaKontaktowa.nazwisko AS "Osoba kontaktowa",
+        CONCAT(OsobaKontaktowa.imie, ' ', OsobaKontaktowa.nazwisko) AS "Osoba kontaktowa",
         OsobaKontaktowa.email AS "E-mail",
         OsobaKontaktowa.telefon AS "Telefon"
     FROM OsobaKontaktowa
@@ -112,15 +112,17 @@ def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
 
+    # Dodajemy RETURNING id na końcu zapytania
     cursor.execute(
-        "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s)",
+        "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s) RETURNING id",
         (imie, nazwisko, email, telefon)
     )
     
-    osoba_id = cursor.lastrowid
+    # Pobieramy wygenerowane ID
+    osoba_id = cursor.fetchone()[0]
     
     cursor.execute(
-        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s)",
+        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osb_id) VALUES (%s, %s)", # Sprawdź czy na pewno osoba_id w bazie
         (id_firmy, osoba_id)
     )
     
@@ -132,7 +134,7 @@ def znajdz_uzytkownika_po_nazwie(pelne_nazwisko):
     czysty_wpis = pelne_nazwisko.strip()
     
     # Szukanie w bazie dokładnego dopasowania (Imię + Spacja + Nazwisko)
-    query = "SELECT id FROM Uzytkownik WHERE imie || ' ' || nazwisko = %s"
+    query = "SELECT id FROM Uzytkownik WHERE CONCAT(imie, ' ', nazwisko) = %s"
     df = pd.read_sql_query(query, conn, params=(czysty_wpis,))
     conn.close()
     
@@ -169,7 +171,6 @@ def pobierz_pilne_follow_upy(id_uzytkownika):
     JOIN Firma ON Interakcja.id_firmy = Firma.id
     WHERE Interakcja.id_uzytkownika = %s 
       AND Interakcja.kolejny_kontakt IS NOT NULL 
-      AND Interakcja.kolejny_kontakt != ''
       AND Interakcja.status = 'W trakcie'
     ORDER BY Interakcja.kolejny_kontakt ASC
     """
@@ -202,7 +203,7 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
 def pobierz_unikalne_projekty_grantow():
     conn = pobierz_polaczenie()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL AND projekt != ''", 
+        "SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL", 
         conn
     )
     conn.close()
