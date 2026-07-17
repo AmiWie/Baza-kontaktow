@@ -179,7 +179,7 @@ def pobierz_pilne_follow_upy(id_uzytkownika):
 
 def pobierz_granty(sortowanie_projekt=None):
     conn = pobierz_polaczenie()
-    query = 'SELECT id, nazwa AS "Nazwa Grantu", instytucja AS "Instytucja", kwota AS \'Kwota (PLN)\', deadline AS \'Deadline\', status AS \'Status\', projekt AS \'Projekt\', notatki, link FROM Granty'
+    query = 'SELECT id, nazwa AS "Nazwa Grantu", instytucja AS "Instytucja", kwota AS "Kwota (PLN)", deadline AS "Deadline", status AS "Status", projekt AS "Projekt", notatki, link FROM Granty'
     if sortowanie_projekt and sortowanie_projekt != "Wszystkie":
         query += " WHERE projekt = ?"
         df = pd.read_sql_query(query, conn, params=(sortowanie_projekt,))
