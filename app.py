@@ -22,7 +22,7 @@ def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do
 
     query = "SELECT * FROM Firma WHERE 1=1"
     params = []
-
+    
     if nazwa_do_szukania:
         query += " AND nazwa LIKE ?"
         params.append('%' + nazwa_do_szukania + '%')
@@ -42,7 +42,7 @@ def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do
 def dodaj_firme(nazwa, kategoria):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (?, ?)", (nazwa, kategoria))
+    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s)", (nazwa, kategoria))
     conn.commit()
     conn.close()
 
@@ -77,7 +77,7 @@ def dodaj_interakcje(id_firmy, id_uzytkownika, data_int, status, komentarz, proj
     cursor = conn.cursor()
     query = """
     INSERT INTO Interakcja (id_firmy, id_uzytkownika, data_interakcji, status, komentarz, projekt, kolejny_kontakt, sciezka_pliku)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
     cursor.execute(query, (id_firmy, id_uzytkownika, data_int, status, komentarz, projekt, kolejny_kont, sciezka_pliku))
     conn.commit()
@@ -113,14 +113,14 @@ def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (?, ?, ?, ?)",
+        "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s)",
         (imie, nazwisko, email, telefon)
     )
     
     osoba_id = cursor.lastrowid
     
     cursor.execute(
-        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (?, ?)",
+        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s)",
         (id_firmy, osoba_id)
     )
     
@@ -193,7 +193,7 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO Granty (nazwa, instytucja, kwota, deadline, status, projekt, notatki, link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO Granty (nazwa, instytucja, kwota, deadline, status, projekt, notatki, link) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
         (nazwa, inst, kwota, ddl, status, proj, notatki, link)
     )
     conn.commit()

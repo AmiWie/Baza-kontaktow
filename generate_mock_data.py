@@ -14,24 +14,24 @@ cursor = conn.cursor()
 for i in range(10): 
     firma = fake.company()
     kategoria = random.choice(['Sponsor', 'Barter'])
-    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (?, ?)", (firma, kategoria))
+    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s)", (firma, kategoria))
 
 for i in range(5):
     imie = fake.first_name()
     nazwisko = fake.last_name()
     email = f"{imie.lower()}.{nazwisko.lower()}@example.com"
-    cursor.execute("INSERT INTO Uzytkownik (imie, nazwisko, email) VALUES (?, ?, ?)", (imie, nazwisko, email))
+    cursor.execute("INSERT INTO Uzytkownik (imie, nazwisko, email) VALUES (%s, %s, %s)", (imie, nazwisko, email))
 
 for i in range(15):
     imie = fake.first_name()
     nazwisko = fake.last_name()
     email = f"{imie.lower()}.{nazwisko.lower()}@example.com"
     telefon = fake.phone_number()
-    cursor.execute("INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (?, ?, ?, ?)", (imie, nazwisko, email, telefon))
+    cursor.execute("INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s)", (imie, nazwisko, email, telefon))
 
     osoba_id = cursor.lastrowid
     firma_id = random.randint(1, 10)
-    cursor.execute("INSERT INTO FirmaOsobaKontaktowa (osoba_id, firma_id) VALUES (?, ?)", (osoba_id, firma_id))
+    cursor.execute("INSERT INTO FirmaOsobaKontaktowa (osoba_id, firma_id) VALUES (%s, %s)", (osoba_id, firma_id))
 
 for i in range(20):
     id_firmy = random.randint(1, 10)
@@ -42,7 +42,7 @@ for i in range(20):
     komentarz = fake.sentence()
     projekt = random.choice(['Projekt A', 'Projekt B', 'Projekt C'])
     kolejny_kontakt = fake.date_time_this_year(after_now=True)
-    cursor.execute("INSERT INTO Interakcja (id_firmy, id_uzytkownika, id_osoby_kontaktowej, data_interakcji, status, komentarz, projekt, kolejny_kontakt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    cursor.execute("INSERT INTO Interakcja (id_firmy, id_uzytkownika, id_osoby_kontaktowej, data_interakcji, status, komentarz, projekt, kolejny_kontakt) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                    (id_firmy, id_uzytkownika, id_osoby_kontaktowej, data_interakcji, status, komentarz, projekt, kolejny_kontakt))
 
 conn.commit()
