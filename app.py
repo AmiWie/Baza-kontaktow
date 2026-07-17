@@ -52,7 +52,7 @@ def pobierz_historie_interakcji(id_firmy):
     SELECT 
         Interakcja.id,
         Interakcja.data_interakcji AS "Data", 
-        CONCAT(Uzytkownik.imie, ' ', Uzytkownik.nazwisko) AS "Uzytkownik"
+        CONCAT(Uzytkownik.imie, ' ', Uzytkownik.nazwisko) AS "Uzytkownik",
         Interakcja.status AS "Status", 
         Interakcja.komentarz AS "Komentarz", 
         Interakcja.projekt AS "Projekt",
