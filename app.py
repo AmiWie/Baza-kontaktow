@@ -122,7 +122,7 @@ def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
     osoba_id = cursor.fetchone()[0]
     
     cursor.execute(
-        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osb_id) VALUES (%s, %s)", # Sprawdź czy na pewno osoba_id w bazie
+        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s)", 
         (id_firmy, osoba_id)
     )
     
