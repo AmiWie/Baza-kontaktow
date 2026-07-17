@@ -24,15 +24,15 @@ def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do
     params = []
     
     if nazwa_do_szukania:
-        query += " AND nazwa LIKE ?"
+        query += " AND nazwa LIKE %s"
         params.append('%' + nazwa_do_szukania + '%')
 
     if kategoria_do_szukania and kategoria_do_szukania != "Wszyscy":
-            query += " AND kategoria = ?"
+            query += " AND kategoria = %s"
             params.append(kategoria_do_szukania)
 
     if projekt_do_szukania and projekt_do_szukania != "Wszystkie":
-        query += " AND id IN (SELECT DISTINCT id_firmy FROM Interakcja WHERE projekt = ?)"
+        query += " AND id IN (SELECT DISTINCT id_firmy FROM Interakcja WHERE projekt = %s)"
         params.append(projekt_do_szukania)
 
     df = pd.read_sql_query(query, conn, params=params)
@@ -59,7 +59,7 @@ def pobierz_historie_interakcji(id_firmy):
         Interakcja.sciezka_pliku
     FROM Interakcja
     JOIN Uzytkownik ON Interakcja.id_uzytkownika = Uzytkownik.id
-    WHERE Interakcja.id_firmy = ?
+    WHERE Interakcja.id_firmy = %s
     ORDER BY Interakcja.data_interakcji DESC
     """
     df = pd.read_sql_query(query, conn, params=(id_firmy,))
@@ -102,7 +102,7 @@ def pobierz_osoby_kontaktowe(id_firmy):
         OsobaKontaktowa.telefon AS "Telefon"
     FROM OsobaKontaktowa
     JOIN FirmaOsobaKontaktowa ON OsobaKontaktowa.id = FirmaOsobaKontaktowa.osoba_id
-    WHERE FirmaOsobaKontaktowa.firma_id = ?
+    WHERE FirmaOsobaKontaktowa.firma_id = %s
     """
     df = pd.read_sql_query(query, conn, params=(id_firmy,))
     conn.close()
@@ -132,7 +132,7 @@ def znajdz_uzytkownika_po_nazwie(pelne_nazwisko):
     czysty_wpis = pelne_nazwisko.strip()
     
     # Szukanie w bazie dokładnego dopasowania (Imię + Spacja + Nazwisko)
-    query = "SELECT id FROM Uzytkownik WHERE imie || ' ' || nazwisko = ?"
+    query = "SELECT id FROM Uzytkownik WHERE imie || ' ' || nazwisko = %s"
     df = pd.read_sql_query(query, conn, params=(czysty_wpis,))
     conn.close()
     
@@ -143,7 +143,7 @@ def znajdz_uzytkownika_po_nazwie(pelne_nazwisko):
 def usun_interakcje(id_interakcji):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM Interakcja WHERE id = ?", (id_interakcji,))
+    cursor.execute("DELETE FROM Interakcja WHERE id = %s", (id_interakcji,))
     conn.commit()
     conn.close()
 
@@ -151,9 +151,9 @@ def usun_firme_i_relacje(id_firmy):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     # Usuń firmę, powiązane osoby kontaktowe i interakcje
-    cursor.execute("DELETE FROM Interakcja WHERE id_firmy = ?", (id_firmy,))
-    cursor.execute("DELETE FROM FirmaOsobaKontaktowa WHERE firma_id = ?", (id_firmy,))
-    cursor.execute("DELETE FROM Firma WHERE id = ?", (id_firmy,))
+    cursor.execute("DELETE FROM Interakcja WHERE id_firmy = %s", (id_firmy,))
+    cursor.execute("DELETE FROM FirmaOsobaKontaktowa WHERE firma_id = %s", (id_firmy,))
+    cursor.execute("DELETE FROM Firma WHERE id = %s", (id_firmy,))
     conn.commit()
     conn.close()
 
@@ -167,7 +167,7 @@ def pobierz_pilne_follow_upy(id_uzytkownika):
         Interakcja.projekt AS "Projekt"
     FROM Interakcja
     JOIN Firma ON Interakcja.id_firmy = Firma.id
-    WHERE Interakcja.id_uzytkownika = ? 
+    WHERE Interakcja.id_uzytkownika = %s 
       AND Interakcja.kolejny_kontakt IS NOT NULL 
       AND Interakcja.kolejny_kontakt != ''
       AND Interakcja.status = 'W trakcie'
@@ -181,7 +181,7 @@ def pobierz_granty(sortowanie_projekt=None):
     conn = pobierz_polaczenie()
     query = 'SELECT id, nazwa AS "Nazwa Grantu", instytucja AS "Instytucja", kwota AS "Kwota (PLN)", deadline AS "Deadline", status AS "Status", projekt AS "Projekt", notatki, link FROM Granty'
     if sortowanie_projekt and sortowanie_projekt != "Wszystkie":
-        query += " WHERE projekt = ?"
+        query += " WHERE projekt = %s"
         df = pd.read_sql_query(query, conn, params=(sortowanie_projekt,))
     else:
         query += " ORDER BY deadline ASC"
@@ -211,14 +211,14 @@ def pobierz_unikalne_projekty_grantow():
 def usun_grant(id_grantu):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM Granty WHERE id = ?", (id_grantu,))
+    cursor.execute("DELETE FROM Granty WHERE id = %s", (id_grantu,))
     conn.commit()
     conn.close()
 
 def aktualizuj_status_interakcji(id_interakcji, nowy_status):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
-    cursor.execute("UPDATE Interakcja SET status = ? WHERE id = ?", (nowy_status, id_interakcji))
+    cursor.execute("UPDATE Interakcja SET status = %s WHERE id = %s", (nowy_status, id_interakcji))
     conn.commit()
     conn.close()
 
