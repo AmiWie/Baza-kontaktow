@@ -8,6 +8,7 @@ from streamlit_calendar import calendar
 import psycopg2
 
 
+# Funkcje do obsługi bazy danych
 
 def pobierz_polaczenie():
     try:
@@ -87,7 +88,9 @@ def pobierz_unikalne_projekty():
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Interakcja WHERE projekt IS NOT NULL", 
+        "SELECT DISTINCT projekt " \
+        "FROM Interakcja " \
+        "WHERE projekt IS NOT NULL", 
         conn
     )
     conn.close()
@@ -194,7 +197,8 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO Granty (nazwa, instytucja, kwota, deadline, status, projekt, notatki, link) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        "INSERT INTO Granty (nazwa, instytucja, kwota, deadline, status, projekt, notatki, link) " \
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
         (nazwa, inst, kwota, ddl, status, proj, notatki, link)
     )
     conn.commit()
@@ -203,7 +207,9 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
 def pobierz_unikalne_projekty_grantow():
     conn = pobierz_polaczenie()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL", 
+        "SELECT DISTINCT projekt " \
+        "FROM Granty " \
+        "WHERE projekt IS NOT NULL", 
         conn
     )
     conn.close()
@@ -252,7 +258,7 @@ if 'wybrany_grant_nazwa' not in st.session_state:
     st.session_state.wybrany_grant_nazwa = None
 
 
-# PANEL BOCZNY - LOGOWANIE TEKSTOWE
+# Panel boczny z lewej strony strony, panel logowania użytkownika
 st.sidebar.title("👤 Twój profil")  
 wpisany_user = st.sidebar.text_input(
     "Wpisz swoje Imię i Nazwisko:",
@@ -283,7 +289,7 @@ tab_firmy, tab_dashboard, tab_granty = st.tabs([
 
 
 
-# SZCZEGÓŁY FIRMY (PROFIL)
+# Szczegóły firmy i interakcje
 with tab_firmy:
     # Sekcja Follow-up 
     if st.session_state.zalogowany_uzytkownik_id:
@@ -364,7 +370,7 @@ with tab_firmy:
         df_historia = pobierz_historie_interakcji(st.session_state.wybrana_firma_id)
         
         if not df_historia.empty:
-            # Dodaliśmy kolumnę na Pobieranie pliku (h5)
+            # kolumna Pobieranie pliku
             h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1.5, 1.5, 3.5, 1.5, 1])
             h1.markdown("**Data**")
             h2.markdown("**Użytkownik**")
@@ -488,7 +494,7 @@ with tab_firmy:
             projekt_do_szukania=wybrany_proj
         )
 
-        # PRZYCISK EKSPORTU (Ustawiony zaraz pod filtrami, a nad tabelą)
+        # przycisk eksportu do CSV
         csv_dane = df_firmy.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 Eksportuj tę listę do Excela (CSV)", 
@@ -520,7 +526,6 @@ with st.form("formularz_nowej_firmy_i_kontaktu", clear_on_submit=True):
     with col_f1:
         f_nazwa = st.text_input("Nazwa firmy *")
     with col_f2:
-        # Zakładam, że masz predefiniowane kategorie, dopasuj do swoich
         f_kategoria = st.selectbox("Kategoria *", ["Sponsor", "Barter", "Inna"])
         
     st.markdown("---")
@@ -591,7 +596,7 @@ with tab_dashboard:
                 colors=colors,
                 textprops={'fontsize': 14, 'color': 'white' if st.get_option("theme.base") == "dark" else "black"}
             )
-            # Przezroczyste tło wykresu, żeby idealnie wtapiał się w interfejs
+            # Przezroczyste tło wykresu
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
             
@@ -606,14 +611,13 @@ with tab_dashboard:
 
 # granty i dofinansowania
 with tab_granty:
-    # Pobieramy pełną bazę grantów bez filtrów, aby zasilić kalendarz
+    # Pobieramy pełną bazę grantów bez filtrów do kalendarza
     df_wszystkie_granty = pobierz_granty(sortowanie_projekt="Wszystkie")
     
-    # 1. SEKCJA: KALENDARZ TERMINÓW (DEADLINES)
+    # kalendarz z deadlinami 
     st.subheader("📅 Harmonogram składania wniosków")
     
     if not df_wszystkie_granty.empty:
-        # Przygotowanie wydarzeń (events) w formacie akceptowanym przez streamlit-calendar
         events = []
         
         # Słownik kolorów dla poszczególnych statusów
@@ -625,7 +629,7 @@ with tab_granty:
         }
         
         for _, row in df_wszystkie_granty.iterrows():
-            if row['Deadline']:  # Upewniamy się, że data istnieje
+            if row['Deadline']:  
                 status_grantu = row['Status']
                 kolor = kolory_statusow.get(status_grantu, "#95A5A6") # Domyślny szary
                 
@@ -668,12 +672,10 @@ with tab_granty:
         
     st.markdown("---")
     
-# 2. SEKCJA: WYSZUKIWARKA, FILTRY, LISTA I EDYCJA
+# wyszukiwanie i zarządzanie wnioskami
     st.subheader("🔍 Zarządzanie wnioskami")
     
-    # ------------------------------------------
-    # WIDOK A: SZCZEGÓŁY I EDYCJA WYBRANEGO GRANTU
-    # ------------------------------------------
+    # szczegóły wybranego grantu
     if st.session_state.wybrany_grant_id is not None:
         # Przycisk powrotu do listy grantów
         if st.button("⬅️ Powrót do listy grantów", key="back_to_grants"):
@@ -682,7 +684,7 @@ with tab_granty:
             st.rerun()
             
         # Pobieramy dane tego konkretnego grantu z aktualnego widoku
-        # (Wyszukujemy go po ID w pobranej bazie)
+        # Wyszukujemy go po ID w pobranej bazie
         df_szczegoly = df_wszystkie_granty[df_wszystkie_granty['id'] == st.session_state.wybrany_grant_id]
         
         if not df_szczegoly.empty:
@@ -724,9 +726,7 @@ with tab_granty:
                         st.toast("Wniosek został pomyślnie usunięty.")
                         st.rerun()
 
-    # ------------------------------------------
-    # WIDOK B: LISTA WSZYSTKICH GRANTÓW (TABELA)
-    # ------------------------------------------
+    # lista wszystkich grantów z filtrami i sortowaniem
     else:
         c_fil1, c_fil2 = st.columns(2)
         
@@ -780,7 +780,7 @@ with tab_granty:
 
         st.markdown("---")
         
-        # Formularz dodawania wyświetla się tylko w widoku listy głównej (porządek na ekranie szczegółów!)
+        # Formularz dodawania wyświetla się tylko w widoku listy głównej 
         st.subheader("➕ Dodaj nowy wniosek grantowy / dofinansowanie")
         with st.form("formularz_nowego_grantu", clear_on_submit=True):
             g_nazwa = st.text_input("Nazwa Grantu / Programu:")

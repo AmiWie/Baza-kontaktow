@@ -1,4 +1,4 @@
-# this file generates the database for the application
+# inicjalizacja bazy danych SQLite
 
 import sqlite3
 
