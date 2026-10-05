@@ -7,24 +7,8 @@ import matplotlib.pyplot as plt
 from streamlit_calendar import calendar
 import psycopg2
 
-# ==========================================
-# 🔒 SYSTEM LOGOWANIA GOOGLE WORKSPACE
-# ==========================================
-if not st.user.is_logged_in:
-    st.set_page_config(page_title="Logowanie | Baza Kontaktów BEST", page_icon="🔒")
-    st.title("🔒 Baza Kontaktów i Współpracy BEST")
-    st.write("Dostęp do systemu mają wyłącznie uprawnieni członkowie organizacji.")
-    st.info("Zaloguj się swoim oficjalnym kontem Google Workspace, aby uzyskać dostęp.")
-    
-    if st.button("🔑 Zaloguj się przez Google Workspace", type="primary"):
-        st.login()
-        
-    st.stop()  # Zatrzymuje wykonywanie kodu aplikacji dla niezalogowanych użytkowników!
 
-
-# ==========================================
-# FUNKCJE DO OBSŁUGI BAZY DANYCH
-# ==========================================
+# Funkcje do obsługi bazy danych
 
 def pobierz_polaczenie():
     try:
@@ -45,8 +29,8 @@ def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do
         params.append('%' + nazwa_do_szukania + '%')
 
     if kategoria_do_szukania and kategoria_do_szukania != "Wszyscy":
-        query += " AND kategoria = %s"
-        params.append(kategoria_do_szukania)
+            query += " AND kategoria = %s"
+            params.append(kategoria_do_szukania)
 
     if projekt_do_szukania and projekt_do_szukania != "Wszystkie":
         query += " AND id IN (SELECT DISTINCT id_firmy FROM Interakcja WHERE projekt = %s)"
@@ -59,11 +43,9 @@ def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do
 def dodaj_firme(nazwa, kategoria):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s) RETURNING id", (nazwa, kategoria))
-    nowa_firma_id = cursor.fetchone()[0]
+    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s)", (nazwa, kategoria))
     conn.commit()
     conn.close()
-    return nowa_firma_id
 
 def pobierz_historie_interakcji(id_firmy):
     conn = pobierz_polaczenie()
@@ -106,7 +88,9 @@ def pobierz_unikalne_projekty():
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Interakcja WHERE projekt IS NOT NULL", 
+        "SELECT DISTINCT projekt " \
+        "FROM Interakcja " \
+        "WHERE projekt IS NOT NULL", 
         conn
     )
     conn.close()
@@ -131,10 +115,13 @@ def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
 
+    # Dodajemy RETURNING id na końcu zapytania
     cursor.execute(
         "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s) RETURNING id",
         (imie, nazwisko, email, telefon)
     )
+    
+    # Pobieramy wygenerowane ID
     osoba_id = cursor.fetchone()[0]
     
     cursor.execute(
@@ -145,28 +132,18 @@ def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
     conn.commit()
     conn.close()
 
-def dopasuj_lub_stworz_uzytkownika(imie_nazwisko_lub_email):
-    """Wyszukuje użytkownika po imieniu/nazwisku lub mailu. Jeśli nie ma - zwraca None."""
+def znajdz_uzytkownika_po_nazwie(pelne_nazwisko):
     conn = pobierz_polaczenie()
-    czysty_wpis = (imie_nazwisko_lub_email or "").strip()
+    czysty_wpis = pelne_nazwisko.strip()
     
-    query = """
-    SELECT id, CONCAT(imie, ' ', nazwisko) AS pelna_nazwa 
-    FROM Uzytkownik 
-    WHERE CONCAT(imie, ' ', nazwisko) ILIKE %s OR email ILIKE %s
-    """
-    try:
-        df = pd.read_sql_query(query, conn, params=(czysty_wpis, czysty_wpis))
-    except Exception:
-        # Fallback jeśli tabela Uzytkownik nie ma jeszcze kolumny email
-        query_fallback = "SELECT id, CONCAT(imie, ' ', nazwisko) AS pelna_nazwa FROM Uzytkownik WHERE CONCAT(imie, ' ', nazwisko) ILIKE %s"
-        df = pd.read_sql_query(query_fallback, conn, params=(czysty_wpis,))
-        
+    # Szukanie w bazie dokładnego dopasowania (Imię + Spacja + Nazwisko)
+    query = "SELECT id FROM Uzytkownik WHERE CONCAT(imie, ' ', nazwisko) = %s"
+    df = pd.read_sql_query(query, conn, params=(czysty_wpis,))
     conn.close()
     
     if not df.empty:
-        return int(df.iloc[0]['id']), df.iloc[0]['pelna_nazwa']
-    return None, czysty_wpis
+        return int(df.iloc[0]['id']) 
+    return None
 
 def usun_interakcje(id_interakcji):
     conn = pobierz_polaczenie()
@@ -178,6 +155,7 @@ def usun_interakcje(id_interakcji):
 def usun_firme_i_relacje(id_firmy):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
+    # Usuń firmę, powiązane osoby kontaktowe i interakcje
     cursor.execute("DELETE FROM Interakcja WHERE id_firmy = %s", (id_firmy,))
     cursor.execute("DELETE FROM FirmaOsobaKontaktowa WHERE firma_id = %s", (id_firmy,))
     cursor.execute("DELETE FROM Firma WHERE id = %s", (id_firmy,))
@@ -229,7 +207,9 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
 def pobierz_unikalne_projekty_grantow():
     conn = pobierz_polaczenie()
     df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL", 
+        "SELECT DISTINCT projekt " \
+        "FROM Granty " \
+        "WHERE projekt IS NOT NULL", 
         conn
     )
     conn.close()
@@ -260,11 +240,11 @@ def aktualizuj_grant(id_grantu, nowy_status, nowy_link):
     conn.close()    
 
 
-# ==========================================
-# GŁÓWNA STRUKTURA I STAN SESJI
-# ==========================================
 
+
+# USER INTERFACE
 st.title("Baza Kontaktów i Współpracy")
+
 
 if 'wybrana_firma_id' not in st.session_state:
     st.session_state.wybrana_firma_id = None
@@ -277,29 +257,29 @@ if 'wybrany_grant_id' not in st.session_state:
 if 'wybrany_grant_nazwa' not in st.session_state:
     st.session_state.wybrany_grant_nazwa = None
 
-# Automatyczna weryfikacja konta Google z bazą Supabase
-user_email = st.user.email
-user_name = st.user.name or user_email
 
-db_user_id, display_name = dopasuj_lub_stworz_uzytkownika(user_name)
-if not db_user_id:
-    # Spróbuj dopasować po adresie email
-    db_user_id, display_name = dopasuj_lub_stworz_uzytkownika(user_email)
+# Panel boczny z lewej strony strony, panel logowania użytkownika
+st.sidebar.title("👤 Twój profil")  
+wpisany_user = st.sidebar.text_input(
+    "Wpisz swoje Imię i Nazwisko:",
+    placeholder="np. Anna Kowalska",
+    value=""
+)
 
-st.session_state.zalogowany_uzytkownik_id = db_user_id
-
-# Panel boczny użytkownika
-st.sidebar.title("👤 Twój profil")
-st.sidebar.write(f"Zalogowano jako: **{user_name}**")
-st.sidebar.caption(f"Email: `{user_email}`")
-
-if db_user_id:
-    st.sidebar.success(f"🔓 Konto powiązane (ID: {db_user_id})")
+if wpisany_user:
+    # System szuka profilu w tle
+    user_id = znajdz_uzytkownika_po_nazwie(wpisany_user)
+    
+    if user_id:
+        st.session_state.zalogowany_uzytkownik_id = user_id
+        st.sidebar.success(f"🔓 Zalogowano jako: **{wpisany_user}**")
+    else:
+        st.session_state.zalogowany_uzytkownik_id = None
+        st.sidebar.error("❌ Nie znaleziono takiego użytkownika. Sprawdź pisownię!")
 else:
-    st.sidebar.warning("⚠️ Twój adres e-mail nie jest jeszcze dopisany do tabeli `Uzytkownik` w Supabase. Poproś administratora o dodanie konta.")
+    st.session_state.zalogowany_uzytkownik_id = None
+    st.sidebar.info("Wpisz swoje dane, aby odblokować zapisywanie kontaktu.")
 
-if st.sidebar.button("🚪 Wyloguj się"):
-    st.logout()
 
 tab_firmy, tab_dashboard, tab_granty = st.tabs([
     "🏢 Baza Firm", 
@@ -308,9 +288,8 @@ tab_firmy, tab_dashboard, tab_granty = st.tabs([
 ])
 
 
-# ==========================================
-# ZAKŁADKA 1: BAZA FIRM
-# ==========================================
+
+# Szczegóły firmy i interakcje
 with tab_firmy:
     # Sekcja Follow-up 
     if st.session_state.zalogowany_uzytkownik_id:
@@ -318,6 +297,7 @@ with tab_firmy:
         if not df_follow.empty:
             st.error("🚨 **Pilne follow-upy na dziś!** Skontaktuj się z firmami i odznacz status:")
             
+            # Nagłówki
             f1, f2, f3, f4, f5 = st.columns([3, 2, 2, 1.5, 1.5])
             f1.markdown("**Firma**")
             f2.markdown("**Termin**")
@@ -332,17 +312,20 @@ with tab_firmy:
                 col_f2.write(row['Termin'])
                 col_f3.write(row['Projekt'])
                 
+                # Przycisk: Oznacz jako Sukces
                 if col_f4.button("✅", key=f"f_succ_{row['id']}", use_container_width=True):
                     aktualizuj_status_interakcji(int(row['id']), "Sukces")
                     st.toast("Status zaktualizowany na Sukces!")
                     st.rerun()
                     
+                # Przycisk: Oznacz jako Odrzucone
                 if col_f5.button("❌", key=f"f_fail_{row['id']}", use_container_width=True):
                     aktualizuj_status_interakcji(int(row['id']), "Odrzucone")
                     st.toast("Status zaktualizowany na Odrzucone.")
                     st.rerun()
 
     if st.session_state.wybrana_firma_id is not None:
+        # Przycisk powrotu do listy
         if st.button("⬅️ Powrót do listy firm"):
             st.session_state.wybrana_firma_id = None
             st.session_state.wybrana_firma_nazwa = None
@@ -358,6 +341,7 @@ with tab_firmy:
         else:
             st.info("Brak przypisanych osób kontaktowych dla tej firmy.")
 
+        # Formularz dodawania nowego kontaktu do tej firmy
         with st.expander("➕ Dodaj nową osobę kontaktową do tej firmy"):
             with st.form("formularz_nowej_osoby", clear_on_submit=True):
                 o_imie = st.text_input("Imię:")
@@ -380,11 +364,13 @@ with tab_firmy:
                         st.rerun()
                     else:
                         st.error("Imię i nazwisko są wymagane!")
+        
 
         st.subheader("Historia kontaktów")
         df_historia = pobierz_historie_interakcji(st.session_state.wybrana_firma_id)
         
         if not df_historia.empty:
+            # kolumna Pobieranie pliku
             h1, h2, h3, h4, h5, h6 = st.columns([1.5, 1.5, 1.5, 3.5, 1.5, 1])
             h1.markdown("**Data**")
             h2.markdown("**Użytkownik**")
@@ -394,6 +380,7 @@ with tab_firmy:
             h6.markdown("**Akcja**")
             st.divider()
             
+            # Iterujemy i wyświetlamy wiersze
             for index, row in df_historia.iterrows():
                 c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.5, 1.5, 3.5, 1.5, 1])
                 c1.write(row['Data'])
@@ -401,6 +388,7 @@ with tab_firmy:
                 c3.write(row['Status'])
                 c4.write(row['Komentarz'])
                 
+                # Przycisk pobierania pliku
                 if 'sciezka_pliku' in row and row['sciezka_pliku'] and os.path.exists(row['sciezka_pliku']):
                     with open(row['sciezka_pliku'], "rb") as file:
                         c5.download_button(
@@ -412,25 +400,29 @@ with tab_firmy:
                 else:
                     c5.write("_Brak pliku_")
                 
+                # Przycisk usuwania dla konkretnego wpisu
                 if c6.button("🗑️", key=f"del_int_{row['id']}"):
+                    # Jeśli plik istnieje fizycznie na dysku, usuwamy go
                     if 'sciezka_pliku' in row and row['sciezka_pliku'] and os.path.exists(row['sciezka_pliku']):
                         try:
                             os.remove(row['sciezka_pliku'])
                         except:
                             pass
-                    usun_interakcje(int(row['id']))
+                    conn_id = int(row['id'])
+                    usun_interakcje(conn_id)
                     st.toast("Notatka usunięta.")
                     st.rerun()
         else:
             st.info("Brak zarejestrowanej historii.")
         
+        # 2. Formularz dodawania interakcji
         st.subheader("➕ Dodaj nową interakcję")
         
         if st.session_state.zalogowany_uzytkownik_id is None:
-            st.warning("👈 Twoje konto Google nie zostało jeszcze połączone z ID użytkownika w bazie. Poproś o dodanie Twojego nazwiska/maila do bazy.")
+            st.warning("👈 Aby dodać nową interakcję, musisz najpierw zalogować się w panelu bocznym (wpisz swoje Imię i Nazwisko)!")
         else:
             with st.form("formularz_interakcji", clear_on_submit=True):
-                st.info(f"Zapisujesz kontakt jako: **{user_name}**")
+                st.info(f"Zapisujesz kontakt jako: **{wpisany_user}**")
                 
                 data_int = st.date_input("Data kontaktu:", value=None)
                 status_int = st.selectbox("Status:", ["W trakcie", "Sukces", "Odrzucone"])
@@ -443,9 +435,12 @@ with tab_firmy:
                 
                 if submitted_interakcja:
                     if data_int and komentarz_int:
+                        uzytkownik_id = st.session_state.zalogowany_uzytkownik_id
+
                         data_int_str = data_int.strftime("%Y-%m-%d") if data_int else None
                         kolejny_kont_str = kolejny_kont.strftime("%Y-%m-%d") if kolejny_kont else None
                         
+                        # Obsługa fizycznego zapisu wgranego pliku na serwerze/dysku
                         sciezka_zapisu = None
                         if wgrany_plik is not None:
                             os.makedirs("uploads", exist_ok=True)
@@ -455,19 +450,20 @@ with tab_firmy:
                         
                         dodaj_interakcje(
                             id_firmy=st.session_state.wybrana_firma_id,
-                            id_uzytkownika=st.session_state.zalogowany_uzytkownik_id,
+                            id_uzytkownika=uzytkownik_id,
                             data_int=data_int_str,
                             status=status_int,
                             komentarz=komentarz_int,
                             projekt=projekt_int,
                             kolejny_kont=kolejny_kont_str,
-                            sciezka_pliku=sciezka_zapisu
+                            sciezka_pliku=sciezka_zapisu  # Przekazujemy ścieżkę pliku do bazy
                         )
 
                         st.toast("Interakcja dodana pomyślnie!")
                         st.rerun()
                     else:
                         st.error("Data kontaktu i notatka nie mogą być puste!")
+                        
 
         potwierdzenie = st.checkbox("Zaznacz, aby odblokować usuwanie firmy")
         
@@ -498,6 +494,7 @@ with tab_firmy:
             projekt_do_szukania=wybrany_proj
         )
 
+        # przycisk eksportu do CSV
         csv_dane = df_firmy.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 Eksportuj tę listę do Excela (CSV)", 
@@ -522,54 +519,50 @@ with tab_firmy:
             st.session_state.wybrana_firma_nazwa = str(df_firmy.iloc[indeks_wiersza]['nazwa'])
             st.rerun()
 
-        # FORMULARZ DODAWANIA FIRMY (Teraz poprawnie umieszczony w widoku firm)
-        st.divider()
         st.subheader("➕ Dodaj nową firmę i kontakt")
 
-        with st.form("formularz_nowej_firmy_i_kontaktu", clear_on_submit=True):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                f_nazwa = st.text_input("Nazwa firmy *")
-            with col_f2:
-                f_kategoria = st.selectbox("Kategoria *", ["Sponsor", "Barter", "Inna"])
-                
-            st.markdown("---")
-            st.caption("👤 Dane osoby kontaktowej (Opcjonalnie – możesz zostawić puste)")
+with st.form("formularz_nowej_firmy_i_kontaktu", clear_on_submit=True):
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        f_nazwa = st.text_input("Nazwa firmy *")
+    with col_f2:
+        f_kategoria = st.selectbox("Kategoria *", ["Sponsor", "Barter", "Inna"])
+        
+    st.markdown("---")
+    st.caption("👤 Dane osoby kontaktowej (Opcjonalnie – możesz zostawić puste)")
+    
+    col_o1, col_o2 = st.columns(2)
+    with col_o1:
+        o_imie = st.text_input("Imię:")
+        o_email = st.text_input("E-mail:")
+    with col_o2:
+        o_nazwisko = st.text_input("Nazwisko:")
+        o_telefon = st.text_input("Telefon:")
+        
+    submitted_all = st.form_submit_button("Zapisz wszystko")
+    
+    if submitted_all:
+        if f_nazwa:
+            nowe_id_firmy = dodaj_firme(f_nazwa, f_kategoria)
+            komunikat = f"Pomyślnie dodano firmę: {f_nazwa}"
+
+            if o_imie:
+                dodaj_osobe_kontaktowa(
+                    id_firmy=nowe_id_firmy,
+                    imie=o_imie,
+                    nazwisko=o_nazwisko,
+                    email=o_email,
+                    telefon=o_telefon
+                )
+                komunikat += f" wraz z kontaktem: {o_imie} {o_nazwisko}"
             
-            col_o1, col_o2 = st.columns(2)
-            with col_o1:
-                o_imie = st.text_input("Imię:")
-                o_email = st.text_input("E-mail:")
-            with col_o2:
-                o_nazwisko = st.text_input("Nazwisko:")
-                o_telefon = st.text_input("Telefon:")
-                
-            submitted_all = st.form_submit_button("Zapisz firmę i kontakt")
-            
-            if submitted_all:
-                if f_nazwa:
-                    nowe_id_firmy = dodaj_firme(f_nazwa, f_kategoria)
-                    komunikat = f"Pomyślnie dodano firmę: {f_nazwa}"
-
-                    if o_imie:
-                        dodaj_osobe_kontaktowa(
-                            id_firmy=nowe_id_firmy,
-                            imie=o_imie,
-                            nazwisko=o_nazwisko,
-                            email=o_email,
-                            telefon=o_telefon
-                        )
-                        komunikat += f" wraz z kontaktem: {o_imie} {o_nazwisko}"
-                    
-                    st.success(komunikat)
-                    st.rerun()
-                else:
-                    st.error("Nazwa firmy jest wymagana!")
+            st.success(komunikat)
+            st.rerun()
+        else:
+            st.error("Nazwa firmy jest wymagana!")
 
 
-# ==========================================
-# ZAKŁADKA 2: DASHBOARD
-# ==========================================
+# dashboard
 with tab_dashboard:
     st.header("Analiza Kontaktów i Współpracy")
     conn = pobierz_polaczenie()
@@ -590,7 +583,9 @@ with tab_dashboard:
         if not df_f.empty:
             kat_counts = df_f['kategoria'].value_counts()
             
+            # Tworzymy wykres kołowy za pomocą matplotlib
             fig, ax = plt.subplots(figsize=(6, 6))
+            # Ustawiamy ciemny motyw wykresu, żeby pasował do Streamlita, albo definiujemy kolory
             colors = ['#4F46E5', '#10B981'] if len(kat_counts) <= 2 else None
             
             ax.pie(
@@ -601,6 +596,7 @@ with tab_dashboard:
                 colors=colors,
                 textprops={'fontsize': 14, 'color': 'white' if st.get_option("theme.base") == "dark" else "black"}
             )
+            # Przezroczyste tło wykresu
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
             
@@ -612,28 +608,30 @@ with tab_dashboard:
             st.bar_chart(df_i['status'].value_counts())
 
 
-# ==========================================
-# ZAKŁADKA 3: GRANTY I DOFINANSOWANIA
-# ==========================================
+
+# granty i dofinansowania
 with tab_granty:
+    # Pobieramy pełną bazę grantów bez filtrów do kalendarza
     df_wszystkie_granty = pobierz_granty(sortowanie_projekt="Wszystkie")
     
+    # kalendarz z deadlinami 
     st.subheader("📅 Harmonogram składania wniosków")
     
     if not df_wszystkie_granty.empty:
         events = []
         
+        # Słownik kolorów dla poszczególnych statusów
         kolory_statusow = {
-            "W przygotowaniu": "#FFA500",
-            "Złożony": "#3498DB",
-            "Zaakceptowany": "#2ECC71",
-            "Odrzucony": "#E74C3C"
+            "W przygotowaniu": "#FFA500",  # Pomarańczowy
+            "Złożony": "#3498DB",          # Niebieski
+            "Zaakceptowany": "#2ECC71",    # Zielony
+            "Odrzucony": "#E74C3C"         # Czerwony
         }
         
         for _, row in df_wszystkie_granty.iterrows():
             if row['Deadline']:  
                 status_grantu = row['Status']
-                kolor = kolory_statusow.get(status_grantu, "#95A5A6")
+                kolor = kolory_statusow.get(status_grantu, "#95A5A6") # Domyślny szary
                 
                 events.append({
                     "title": f"⏱️ [{row['Projekt']}] {row['Nazwa Grantu']}",
@@ -644,6 +642,7 @@ with tab_granty:
                     "allDay": True
                 })
         
+        # Konfiguracja opcji FullCalendar
         calendar_options = {
             "headerToolbar": {
                 "left": "prev,next today",
@@ -651,12 +650,14 @@ with tab_granty:
                 "right": "dayGridMonth,timeGridWeek"
             },
             "initialView": "dayGridMonth",
-            "locale": "pl",
-            "firstDay": 1
+            "locale": "pl", # Polski język kalendarza
+            "firstDay": 1   # Poniedziałek jako pierwszy dzień tygodnia
         }
         
+        # Renderowanie kalendarza
         calendar(events=events, options=calendar_options, key="granty_calendar")
         
+        # Mała legenda pod kalendarzem
         st.markdown(
             "<div style='display: flex; gap: 15px; font-size: 0.85rem; justify-content: center; margin-top: -10px;'>"
             "<span>🟠 W przygotowaniu</span>"
@@ -671,14 +672,19 @@ with tab_granty:
         
     st.markdown("---")
     
+# wyszukiwanie i zarządzanie wnioskami
     st.subheader("🔍 Zarządzanie wnioskami")
     
+    # szczegóły wybranego grantu
     if st.session_state.wybrany_grant_id is not None:
+        # Przycisk powrotu do listy grantów
         if st.button("⬅️ Powrót do listy grantów", key="back_to_grants"):
             st.session_state.wybrany_grant_id = None
             st.session_state.wybrany_grant_nazwa = None
             st.rerun()
             
+        # Pobieramy dane tego konkretnego grantu z aktualnego widoku
+        # Wyszukujemy go po ID w pobranej bazie
         df_szczegoly = df_wszystkie_granty[df_wszystkie_granty['id'] == st.session_state.wybrany_grant_id]
         
         if not df_szczegoly.empty:
@@ -688,6 +694,7 @@ with tab_granty:
             st.markdown(f"**Projekt:** `{grant_data['Projekt']}` | **Instytucja:** *{grant_data['Instytucja']}*")
             st.markdown(f"**Kwota:** `{grant_data['Kwota (PLN)']} PLN` | **Deadline (DDL):** `{grant_data['Deadline']}`")
             
+            # Przycisk z linkiem
             if grant_data['link']:
                 st.link_button("🔗 Otwórz wniosek / dokumentację", grant_data['link'], type="secondary")
             else:
@@ -695,8 +702,9 @@ with tab_granty:
                 
             st.info(f"**Dodatkowe notatki:**\n\n{grant_data['notatki'] if grant_data['notatki'] else '_Brak dodatkowych uwag._'}")
             
+            # Formularz edycji wybranego grantu
             with st.expander("⚙️ Edytuj status, link lub usuń ten grant"):
-                with st.form(key="edit_single_grant_form"):
+                with st.form(key=f"edit_single_grant_form"):
                     col_ed1, col_ed2 = st.columns(2)
                     with col_ed1:
                         lista_statusow = ["W przygotowaniu", "Złożony", "Zaakceptowany", "Odrzucony"]
@@ -718,6 +726,7 @@ with tab_granty:
                         st.toast("Wniosek został pomyślnie usunięty.")
                         st.rerun()
 
+    # lista wszystkich grantów z filtrami i sortowaniem
     else:
         c_fil1, c_fil2 = st.columns(2)
         
@@ -736,17 +745,20 @@ with tab_granty:
                 key="sort_grant_criteria"
             )
             
+        # Pobieramy dane z bazy uwzględniając filtr projektu
         df_granty_widok = pobierz_granty(sortowanie_projekt=wybrany_proj_grant)
         
+        # Logika sortowania w pamięci
         if not df_granty_widok.empty:
-            if kryterium_sortowania == "Najbliższy termin (Deadline)":
+            if kryterium_sortowania == "Najbliższy termin":
                 df_granty_widok = df_granty_widok.sort_values(by="Deadline", ascending=True)
-            elif kryterium_sortowania == "Statusie (Alfabetycznie)":
+            elif kryterium_sortowania == "Status":
                 df_granty_widok = df_granty_widok.sort_values(by="Status", ascending=True)
 
         if not df_granty_widok.empty:
             st.markdown(f"Znaleziono wniosków: **{len(df_granty_widok)}** (Kliknij wiersz, aby zobaczyć szczegóły i edytować)")
             
+            # Renderujemy interaktywną tabelę z wyborem jednego wiersza!
             event_grant = st.dataframe(
                 df_granty_widok, 
                 use_container_width=True, 
@@ -757,6 +769,7 @@ with tab_granty:
                 key="granty_table"
             )
             
+            # Reakcja na kliknięcie wiersza w tabeli grantów
             if len(event_grant.selection.rows) > 0:
                 indeks_wiersza_g = event_grant.selection.rows[0]
                 st.session_state.wybrany_grant_id = int(df_granty_widok.iloc[indeks_wiersza_g]['id'])
@@ -767,6 +780,7 @@ with tab_granty:
 
         st.markdown("---")
         
+        # Formularz dodawania wyświetla się tylko w widoku listy głównej 
         st.subheader("➕ Dodaj nowy wniosek grantowy / dofinansowanie")
         with st.form("formularz_nowego_grantu", clear_on_submit=True):
             g_nazwa = st.text_input("Nazwa Grantu / Programu:")
@@ -803,3 +817,4 @@ with tab_granty:
                     st.rerun()
                 else:
                     st.error("Nazwa, instytucja oraz projekt są polami wymaganymi!")
+    
