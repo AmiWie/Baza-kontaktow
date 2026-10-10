@@ -6,12 +6,15 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from streamlit_calendar import calendar
 import psycopg2
+from psycopg2 import pool
 
-# ==========================================
-# 🔒 BLOKADA BEZPIECZEŃSTWA (GOOGLE AUTH)
-# ==========================================
+
+st.set_page_config(page_title="Baza Kontaktów BEST", page_icon="🏢", layout="wide")
+
+
+# Logowanie (GOOGLE AUTH)
+
 if not st.user.is_logged_in:
-    st.set_page_config(page_title="Logowanie | Baza Kontaktów BEST", page_icon="🔒")
     st.title("🔒 Baza Kontaktów i Współpracy BEST")
     st.write("Dostęp do systemu mają wyłącznie uprawnieni członkowie organizacji.")
     st.info("Zaloguj się swoim kontem Google Workspace, aby odblokować dostęp.")
@@ -19,24 +22,43 @@ if not st.user.is_logged_in:
     if st.button("🔑 Zaloguj się przez Google Workspace", type="primary"):
         st.login()
         
-    st.stop()  # Zatrzymuje wykonywanie reszty kodu dla niezalogowanych!
+    st.stop()
 
 
-# ==========================================
-# FUNKCJE DO OBSŁUGI BAZY DANYCH
-# ==========================================
+# Optymalizacja połączenia z bazą danych (CONNECTION POOL)
+
+@st.cache_resource
+def pobierz_pule_polaczen():
+    """Utrzymuje stałą, otwartą pulę połączeń do Supabase w pamięci."""
+    if st.secrets is not None and "SUPABASE_URL" in st.secrets:
+        return psycopg2.pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dsn=st.secrets["SUPABASE_URL"]
+        )
+    return None
 
 def pobierz_polaczenie():
-    try:
-        if st.secrets is not None and "SUPABASE_URL" in st.secrets:
-            return psycopg2.connect(st.secrets["SUPABASE_URL"])
-    except Exception:
-        pass
+    """Pobiera gotowe połączenie z puli zamiast zestawiać nowe za każdym razem."""
+    pula = pobierz_pule_polaczen()
+    if pula:
+        return pula.getconn()
     return sqlite3.connect('database.db')
 
+def zwolnij_polaczenie(conn):
+    """Oddaje połączenie do puli."""
+    pula = pobierz_pule_polaczen()
+    if pula and isinstance(conn, psycopg2.extensions.connection):
+        pula.putconn(conn)
+    else:
+        conn.close()
+
+
+# Zapytania z cache (st.cache_data)
+
+@st.cache_data(ttl=15)
 def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do_szukania=None):
     conn = pobierz_polaczenie()
-
     query = "SELECT * FROM Firma WHERE 1=1"
     params = []
     
@@ -53,18 +75,17 @@ def pobierz_firmy(nazwa_do_szukania=None, kategoria_do_szukania=None, projekt_do
         params.append(projekt_do_szukania)
 
     df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
+    zwolnij_polaczenie(conn)
     return df
 
-def dodaj_firme(nazwa, kategoria):
+@st.cache_data(ttl=60)
+def pobierz_unikalne_projekty():
     conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s) RETURNING id", (nazwa, kategoria))
-    nowa_firma_id = cursor.fetchone()[0]
-    conn.commit()
-    conn.close()
-    return nowa_firma_id
+    df = pd.read_sql_query("SELECT DISTINCT projekt FROM Interakcja WHERE projekt IS NOT NULL", conn)
+    zwolnij_polaczenie(conn)
+    return df['projekt'].tolist()
 
+@st.cache_data(ttl=15)
 def pobierz_historie_interakcji(id_firmy):
     conn = pobierz_polaczenie()
     query = """
@@ -82,36 +103,10 @@ def pobierz_historie_interakcji(id_firmy):
     ORDER BY Interakcja.data_interakcji DESC
     """
     df = pd.read_sql_query(query, conn, params=(id_firmy,))
-    conn.close()
+    zwolnij_polaczenie(conn)
     return df
 
-def pobierz_uzytkownikow():
-    conn = pobierz_polaczenie()
-    df = pd.read_sql_query("SELECT id, CONCAT(imie, ' ', nazwisko) AS nazwa FROM Uzytkownik", conn)
-    conn.close()
-    return df
-
-def dodaj_interakcje(id_firmy, id_uzytkownika, data_int, status, komentarz, projekt, kolejny_kont, sciezka_pliku=None):
-    conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-    query = """
-    INSERT INTO Interakcja (id_firmy, id_uzytkownika, data_interakcji, status, komentarz, projekt, kolejny_kontakt, sciezka_pliku)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """
-    cursor.execute(query, (id_firmy, id_uzytkownika, data_int, status, komentarz, projekt, kolejny_kont, sciezka_pliku))
-    conn.commit()
-    conn.close()
-
-def pobierz_unikalne_projekty():
-    conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-    df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Interakcja WHERE projekt IS NOT NULL", 
-        conn
-    )
-    conn.close()
-    return df['projekt'].tolist()
-
+@st.cache_data(ttl=15)
 def pobierz_osoby_kontaktowe(id_firmy):
     conn = pobierz_polaczenie()
     query = """
@@ -124,29 +119,11 @@ def pobierz_osoby_kontaktowe(id_firmy):
     WHERE FirmaOsobaKontaktowa.firma_id = %s
     """
     df = pd.read_sql_query(query, conn, params=(id_firmy,))
-    conn.close()
+    zwolnij_polaczenie(conn)
     return df
 
-def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
-    conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s) RETURNING id",
-        (imie, nazwisko, email, telefon)
-    )
-    osoba_id = cursor.fetchone()[0]
-    
-    cursor.execute(
-        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s)", 
-        (id_firmy, osoba_id)
-    )
-    
-    conn.commit()
-    conn.close()
-
+@st.cache_data(ttl=300)
 def dopasuj_lub_stworz_uzytkownika(imie_nazwisko_lub_email):
-    """Szuka użytkownika po imieniu/nazwisku lub emailu w bazie."""
     conn = pobierz_polaczenie()
     czysty_wpis = (imie_nazwisko_lub_email or "").strip()
     
@@ -158,32 +135,15 @@ def dopasuj_lub_stworz_uzytkownika(imie_nazwisko_lub_email):
     try:
         df = pd.read_sql_query(query, conn, params=(czysty_wpis, czysty_wpis))
     except Exception:
-        # Fallback jeśli tabela Uzytkownik nie ma jeszcze kolumny email
         query_fallback = "SELECT id, CONCAT(imie, ' ', nazwisko) AS pelna_nazwa FROM Uzytkownik WHERE CONCAT(imie, ' ', nazwisko) ILIKE %s"
         df = pd.read_sql_query(query_fallback, conn, params=(czysty_wpis,))
         
-    conn.close()
-    
+    zwolnij_polaczenie(conn)
     if not df.empty:
         return int(df.iloc[0]['id']), df.iloc[0]['pelna_nazwa']
     return None, czysty_wpis
 
-def usun_interakcje(id_interakcji):
-    conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM Interakcja WHERE id = %s", (id_interakcji,))
-    conn.commit()
-    conn.close()
-
-def usun_firme_i_relacje(id_firmy):
-    conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM Interakcja WHERE id_firmy = %s", (id_firmy,))
-    cursor.execute("DELETE FROM FirmaOsobaKontaktowa WHERE firma_id = %s", (id_firmy,))
-    cursor.execute("DELETE FROM Firma WHERE id = %s", (id_firmy,))
-    conn.commit()
-    conn.close()
-
+@st.cache_data(ttl=15)
 def pobierz_pilne_follow_upy(id_uzytkownika):
     conn = pobierz_polaczenie()
     query = """
@@ -200,9 +160,10 @@ def pobierz_pilne_follow_upy(id_uzytkownika):
     ORDER BY Interakcja.kolejny_kontakt ASC
     """
     df = pd.read_sql_query(query, conn, params=(id_uzytkownika,))
-    conn.close()
+    zwolnij_polaczenie(conn)
     return df
 
+@st.cache_data(ttl=15)
 def pobierz_granty(sortowanie_projekt=None):
     conn = pobierz_polaczenie()
     query = 'SELECT id, nazwa AS "Nazwa Grantu", instytucja AS "Instytucja", kwota AS "Kwota (PLN)", deadline AS "Deadline", status AS "Status", projekt AS "Projekt", notatki, link FROM Granty'
@@ -212,8 +173,91 @@ def pobierz_granty(sortowanie_projekt=None):
     else:
         query += " ORDER BY deadline ASC"
         df = pd.read_sql_query(query, conn)
-    conn.close()
+    zwolnij_polaczenie(conn)
     return df
+
+@st.cache_data(ttl=60)
+def pobierz_unikalne_projekty_grantow():
+    conn = pobierz_polaczenie()
+    df = pd.read_sql_query("SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL", conn)
+    zwolnij_polaczenie(conn)
+    return df['projekt'].tolist()
+
+@st.cache_data(ttl=15)
+def pobierz_statystyki_dashboard():
+    conn = pobierz_polaczenie()
+    df_f = pd.read_sql_query("SELECT kategoria FROM Firma", conn)
+    df_i = pd.read_sql_query("SELECT status, projekt FROM Interakcja", conn)
+    zwolnij_polaczenie(conn)
+    return df_f, df_i
+
+
+
+# operacje zapisu z clear cache
+
+def dodaj_firme(nazwa, kategoria):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s) RETURNING id", (nazwa, kategoria))
+    nowa_firma_id = cursor.fetchone()[0]
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+    return nowa_firma_id
+
+def dodaj_osobe_kontaktowa(id_firmy, imie, nazwisko, email, telefon):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) VALUES (%s, %s, %s, %s) RETURNING id",
+        (imie, nazwisko, email, telefon)
+    )
+    osoba_id = cursor.fetchone()[0]
+    cursor.execute(
+        "INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s)", 
+        (id_firmy, osoba_id)
+    )
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+
+def dodaj_interakcje(id_firmy, id_uzytkownika, data_int, status, komentarz, projekt, kolejny_kont, sciezka_pliku=None):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    query = """
+    INSERT INTO Interakcja (id_firmy, id_uzytkownika, data_interakcji, status, komentarz, projekt, kolejny_kontakt, sciezka_pliku)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    cursor.execute(query, (id_firmy, id_uzytkownika, data_int, status, komentarz, projekt, kolejny_kont, sciezka_pliku))
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+
+def usun_interakcje(id_interakcji):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM Interakcja WHERE id = %s", (id_interakcji,))
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+
+def usun_firme_i_relacje(id_firmy):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM Interakcja WHERE id_firmy = %s", (id_firmy,))
+    cursor.execute("DELETE FROM FirmaOsobaKontaktowa WHERE firma_id = %s", (id_firmy,))
+    cursor.execute("DELETE FROM Firma WHERE id = %s", (id_firmy,))
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+
+def aktualizuj_status_interakcji(id_interakcji, nowy_status):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE Interakcja SET status = %s WHERE id = %s", (nowy_status, id_interakcji))
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
 
 def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
     conn = pobierz_polaczenie()
@@ -224,30 +268,16 @@ def dodaj_grant(nazwa, inst, kwota, ddl, status, proj, notatki, link=None):
         (nazwa, inst, kwota, ddl, status, proj, notatki, link)
     )
     conn.commit()
-    conn.close()
-
-def pobierz_unikalne_projekty_grantow():
-    conn = pobierz_polaczenie()
-    df = pd.read_sql_query(
-        "SELECT DISTINCT projekt FROM Granty WHERE projekt IS NOT NULL", 
-        conn
-    )
-    conn.close()
-    return df['projekt'].tolist()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
 
 def usun_grant(id_grantu):
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM Granty WHERE id = %s", (id_grantu,))
     conn.commit()
-    conn.close()
-
-def aktualizuj_status_interakcji(id_interakcji, nowy_status):
-    conn = pobierz_polaczenie()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE Interakcja SET status = %s WHERE id = %s", (nowy_status, id_interakcji))
-    conn.commit()
-    conn.close()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
 
 def aktualizuj_grant(id_grantu, nowy_status, nowy_link):
     conn = pobierz_polaczenie()
@@ -257,14 +287,14 @@ def aktualizuj_grant(id_grantu, nowy_status, nowy_link):
         (nowy_status, nowy_link, id_grantu)
     )
     conn.commit()
-    conn.close()    
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
 
 
-# ==========================================
-# INTERFEJS I STAN SESJI ZALOGOWANEGO
-# ==========================================
 
-st.title("Baza Kontaktów i Współpracy")
+# Interfejs użytkownika
+
+st.title("Baza Kontaktów i Współprac")
 
 if 'wybrana_firma_id' not in st.session_state:
     st.session_state.wybrana_firma_id = None
@@ -277,18 +307,15 @@ if 'wybrany_grant_id' not in st.session_state:
 if 'wybrany_grant_nazwa' not in st.session_state:
     st.session_state.wybrany_grant_nazwa = None
 
-# Dane zalogowanego użytkownika odczytane wprost z konta Google Workspace
 user_email = st.user.email
 user_name = st.user.name or user_email
 
-# Próba powiązania konta Google z rekordem w tabeli Uzytkownik w Supabase
 db_user_id, display_name = dopasuj_lub_stworz_uzytkownika(user_name)
 if not db_user_id:
     db_user_id, display_name = dopasuj_lub_stworz_uzytkownika(user_email)
 
 st.session_state.zalogowany_uzytkownik_id = db_user_id
 
-# Pasek boczny z profilem i przyciskiem wylogowania
 st.sidebar.title("👤 Twój profil")
 st.sidebar.write(f"Zalogowano: **{user_name}**")
 st.sidebar.caption(f"E-mail: `{user_email}`")
@@ -308,9 +335,8 @@ tab_firmy, tab_dashboard, tab_granty = st.tabs([
 ])
 
 
-# ==========================================
-# ZAKŁADKA 1: BAZA FIRM
-# ==========================================
+
+# ZAKŁADKA 1: baza firm i kontaktów
 with tab_firmy:
     if st.session_state.zalogowany_uzytkownik_id:
         df_follow = pobierz_pilne_follow_upy(st.session_state.zalogowany_uzytkownik_id)
@@ -426,7 +452,7 @@ with tab_firmy:
         st.subheader("➕ Dodaj nową interakcję")
         
         if st.session_state.zalogowany_uzytkownik_id is None:
-            st.warning("👈 Twoje konto Google nie zostało jeszcze połączone z ID użytkownika w bazie. Poproś administratora o dopisanie Twoich danych.")
+            st.warning("👈 Twoje konto Google nie zostało jeszcze połączone z ID użytkownika w bazie.")
         else:
             with st.form("formularz_interakcji", clear_on_submit=True):
                 st.info(f"Zapisujesz kontakt jako: **{user_name}**")
@@ -478,7 +504,7 @@ with tab_firmy:
             st.session_state.wybrana_firma_nazwa = None
             st.rerun()    
 
-    # GŁÓWNA LISTA FIRM
+    # główna lista firm i wyszukiwarka
     else:
         st.subheader("Wyszukiwarka i filtry firm")
         
@@ -565,15 +591,11 @@ with tab_firmy:
                     st.error("Nazwa firmy jest wymagana!")
 
 
-# ==========================================
-# ZAKŁADKA 2: DASHBOARD
-# ==========================================
+
+# ZAKŁADKA 2: dashboard i statystyki
 with tab_dashboard:
     st.header("Analiza Kontaktów i Współpracy")
-    conn = pobierz_polaczenie()
-    df_f = pd.read_sql_query("SELECT kategoria FROM Firma", conn)
-    df_i = pd.read_sql_query("SELECT status, projekt FROM Interakcja", conn)
-    conn.close()
+    df_f, df_i = pobierz_statystyki_dashboard()
     
     kpi1, kpi2, kpi3 = st.columns(3)
     kpi1.metric("Wszystkie firmy w bazie", len(df_f))
@@ -601,7 +623,6 @@ with tab_dashboard:
             )
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
-            
             st.pyplot(fig)
             
     with col_chart2:
@@ -610,9 +631,8 @@ with tab_dashboard:
             st.bar_chart(df_i['status'].value_counts())
 
 
-# ==========================================
-# ZAKŁADKA 3: GRANTY I DOFINANSOWANIA
-# ==========================================
+
+# ZAKŁADKA 3: granty i dofinansowania
 with tab_granty:
     df_wszystkie_granty = pobierz_granty(sortowanie_projekt="Wszystkie")
     
@@ -620,7 +640,6 @@ with tab_granty:
     
     if not df_wszystkie_granty.empty:
         events = []
-        
         kolory_statusow = {
             "W przygotowaniu": "#FFA500",
             "Złożony": "#3498DB",
@@ -668,7 +687,6 @@ with tab_granty:
         st.info("Brak grantów z przypisanymi terminami do wyświetlenia w kalendarzu.")
         
     st.markdown("---")
-    
     st.subheader("🔍 Zarządzanie wnioskami")
     
     if st.session_state.wybrany_grant_id is not None:
@@ -681,7 +699,6 @@ with tab_granty:
         
         if not df_szczegoly.empty:
             grant_data = df_szczegoly.iloc[0]
-            
             st.markdown(f"## 📜 Grant: {grant_data['Nazwa Grantu']}")
             st.markdown(f"**Projekt:** `{grant_data['Projekt']}` | **Instytucja:** *{grant_data['Instytucja']}*")
             st.markdown(f"**Kwota:** `{grant_data['Kwota (PLN)']} PLN` | **Deadline (DDL):** `{grant_data['Deadline']}`")
@@ -718,7 +735,6 @@ with tab_granty:
 
     else:
         c_fil1, c_fil2 = st.columns(2)
-        
         with c_fil1:
             lista_proj_grantow = pobierz_unikalne_projekty_grantow()
             wybrany_proj_grant = st.selectbox(
@@ -764,7 +780,6 @@ with tab_granty:
             st.info("Brak wniosków spełniających kryteria wyszukiwania.")
 
         st.markdown("---")
-        
         st.subheader("➕ Dodaj nowy wniosek grantowy / dofinansowanie")
         with st.form("formularz_nowego_grantu", clear_on_submit=True):
             g_nazwa = st.text_input("Nazwa Grantu / Programu:")
