@@ -408,6 +408,9 @@ def parsuj_procent(val):
         return 0.0
 
 def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
+    # Standaryzacja nazw kolumn (usuwamy zbędne spacje z nagłówków)
+    df_dane.columns = df_dane.columns.str.strip()
+    
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     
@@ -416,34 +419,34 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
     dodane_interakcje = 0
     dzisiaj_str = datetime.today().strftime("%Y-%m-%d")
 
-    # 1. Zapis zbiorczych statystyk projektów (agregacja unikalnych projektów)
-    unikalne_projekty = df_dane['Projekt'].dropna().unique()
-    for proj in unikalne_projekty:
-        df_proj = df_dane[df_dane['Projekt'] == proj]
-        pierwszy_wiersz = df_proj.iloc[0]
+    # 1. Zapis zbiorczych statystyk projektów
+    if 'Projekt' in df_dane.columns:
+        unikalne_projekty = df_dane['Projekt'].dropna().unique()
+        for proj in unikalne_projekty:
+            df_proj = df_dane[df_dane['Projekt'] == proj]
+            wiersz = df_proj.iloc[0]
 
-        wyslane = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Wysłane maile', 0))
-        odpowiedzi = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Odpowiedzi mailowe', 0))
-        rr = parsuj_procent(pierwszy_wiersz.get('Statystyka: Response Rate', 0.0))
-        w_mail = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Współprace z maila', 0))
-        w_tel = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Współprace z telefonu', 0))
-        w_osob = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Współprace osobiście', 0))
+            wyslane = parsuj_liczbe(wiersz.get('Statystyka: Wysłane maile', 0))
+            odpowiedzi = parsuj_liczbe(wiersz.get('Statystyka: Odpowiedzi mailowe', 0))
+            rr = parsuj_procent(wiersz.get('Statystyka: Response Rate', 0.0))
+            w_mail = parsuj_liczbe(wiersz.get('Statystyka: Współprace z maila', 0))
+            w_tel = parsuj_liczbe(wiersz.get('Statystyka: Współprace z telefonu', 0))
+            w_osob = parsuj_liczbe(wiersz.get('Statystyka: Współprace osobiście', 0))
 
-        # UPSERT w PostgreSQL
-        cursor.execute("""
-            INSERT INTO ProjektStatystyki (
-                projekt, wyslane_maile, odpowiedzi_mailowe, response_rate,
-                wspolprace_mail, wspolprace_telefon, wspolprace_osobiscie, ostatnia_aktualizacja
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (projekt) DO UPDATE SET
-                wyslane_maile = EXCLUDED.wyslane_maile,
-                odpowiedzi_mailowe = EXCLUDED.odpowiedzi_mailowe,
-                response_rate = EXCLUDED.response_rate,
-                wspolprace_mail = EXCLUDED.wspolprace_mail,
-                wspolprace_telefon = EXCLUDED.wspolprace_telefon,
-                wspolprace_osobiscie = EXCLUDED.wspolprace_osobiscie,
-                ostatnia_aktualizacja = CURRENT_TIMESTAMP;
-        """, (proj, wyslane, odpowiedzi, rr, w_mail, w_tel, w_osob))
+            cursor.execute("""
+                INSERT INTO ProjektStatystyki (
+                    projekt, wyslane_maile, odpowiedzi_mailowe, response_rate,
+                    wspolprace_mail, wspolprace_telefon, wspolprace_osobiscie, ostatnia_aktualizacja
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (projekt) DO UPDATE SET
+                    wyslane_maile = EXCLUDED.wyslane_maile,
+                    odpowiedzi_mailowe = EXCLUDED.odpowiedzi_mailowe,
+                    response_rate = EXCLUDED.response_rate,
+                    wspolprace_mail = EXCLUDED.wspolprace_mail,
+                    wspolprace_telefon = EXCLUDED.wspolprace_telefon,
+                    wspolprace_osobiscie = EXCLUDED.wspolprace_osobiscie,
+                    ostatnia_aktualizacja = CURRENT_TIMESTAMP;
+            """, (str(proj).strip(), wyslane, odpowiedzi, rr, w_mail, w_tel, w_osob))
 
     # 2. Rejestracja firm, osób i interakcji
     for _, row in df_dane.iterrows():
@@ -492,7 +495,7 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
                 cursor.execute("INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (firma_id, osoba_id))
                 dodane_osoby += 1
 
-        # Interakcja z uwzględnieniem sposobu kontaktu
+        # Interakcja
         cursor.execute("SELECT id FROM Interakcja WHERE id_firmy = %s AND projekt = %s", (firma_id, projekt))
         if not cursor.fetchone():
             cursor.execute("""
@@ -503,9 +506,8 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
 
     conn.commit()
     zwolnij_polaczenie(conn)
-    st.cache_data.clear()
+    st.cache_data.clear()  # Czyści pamięć podręczną wszystkich dashboardów i tabel
     return dodane_firmy, dodane_osoby, dodane_interakcje
-
 
 # Interfejs użytkownika
 
@@ -830,20 +832,32 @@ with tab_dashboard:
         if not df_f.empty:
             kat_counts = df_f['kategoria'].value_counts()
             
-            fig, ax = plt.subplots(figsize=(6, 6))
-            colors = ['#4F46E5', '#10B981'] if len(kat_counts) <= 2 else None
+            fig, ax = plt.subplots(figsize=(6, 5))
+            kolory = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
             
-            ax.pie(
+            wedges, texts, autotexts = ax.pie(
                 kat_counts, 
-                labels=kat_counts.index, 
                 autopct='%1.1f%%', 
                 startangle=90, 
-                colors=colors,
-                textprops={'fontsize': 14, 'color': 'white' if st.get_option("theme.base") == "dark" else "black"}
+                colors=kolory[:len(kat_counts)],
+                pctdistance=0.75,
+                textprops={'fontsize': 11, 'color': 'white', 'weight': 'bold'}
             )
+            
+            # Dodanie czytelnej legendy z nazwami kategorii i liczbą firm
+            legend_labels = [f"{kat} ({ilosc})" for kat, ilosc in zip(kat_counts.index, kat_counts.values)]
+            ax.legend(
+                wedges, 
+                legend_labels, 
+                title="Kategorie", 
+                loc="center left", 
+                bbox_to_anchor=(1, 0, 0.5, 1),
+                frameon=False
+            )
+            
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
-            st.pyplot(fig)
+            st.pyplot(fig, use_container_width=True)
             
     with col_chart2:
         st.subheader("📈 Efektywność kontaktu")
@@ -1075,8 +1089,8 @@ with tab_granty:
 
 # zakładka 4 import z arkusza
 with tab_import:
-    st.header("📥 Masowy import kontaktów i współprac")
-    st.write("Wgraj arkusz `.xlsx` lub `.csv` z danymi kontaktowymi.")
+    st.header("Import kontaktów i statystyk (CSV)")
+    st.write("Wgraj plik `.csv` z danymi współprac i podsumowaniem mailingu projektu.")
 
     # Szablon do pobrania
     szablon_df = pd.DataFrame([{
@@ -1088,7 +1102,14 @@ with tab_import:
         "Email": "jan.kowalski@firma.pl",
         "Telefon": "+48 123 456 789",
         "Status": "Sukces",
-        "Komentarz": "Współpraca potwierdzona"
+        "Komentarz": "Współpraca potwierdzona",
+        "Sposób nawiązania kontaktu": "Mail",
+        "Statystyka: Wysłane maile": 120,
+        "Statystyka: Odpowiedzi mailowe": 24,
+        "Statystyka: Response Rate": "20.0%",
+        "Statystyka: Współprace z maila": 3,
+        "Statystyka: Współprace z telefonu": 1,
+        "Statystyka: Współprace osobiście": 0
     }])
     csv_szablon = szablon_df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(
@@ -1100,38 +1121,43 @@ with tab_import:
 
     st.divider()
 
-    uploaded_file = st.file_uploader("Wybierz plik z kontaktami:", type=["xlsx", "csv"])
+    # Dynamiczny klucz do automatycznego resetowania uploadera
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
+    uploaded_file = st.file_uploader(
+        "Wybierz plik CSV:", 
+        type=["csv"], 
+        key=f"csv_uploader_{st.session_state.uploader_key}"
+    )
 
     if uploaded_file is not None:
         try:
-            if uploaded_file.name.endswith('.csv'):
-                df_upload = pd.read_csv(uploaded_file)
-            else:
-                df_upload = pd.read_excel(uploaded_file)
-
+            df_upload = pd.read_csv(uploaded_file)
             st.write("### Podgląd wczytanych danych:")
             st.dataframe(df_upload.head(10), use_container_width=True)
 
             wymagane_kolumny = {"Nazwa firmy", "Projekt"}
-            brakujace = wymagane_kolumny - set(df_upload.columns)
+            brakujace = wymagane_kolumny - set(df_upload.columns.str.strip())
 
             if brakujace:
-                st.error(f"Brakuje wymaganych kolumn w arkuszu: `{', '.join(brakujace)}`")
+                st.error(f"Brakuje wymaganych kolumn w pliku CSV: `{', '.join(brakujace)}`")
             else:
                 st.info(f"Wykryto **{len(df_upload)}** wierszy do przetworzenia.")
                 if st.button("🚀 Rozpocznij import danych", type="primary"):
                     if st.session_state.zalogowany_uzytkownik_id is None:
-                        st.error("Brak przypisanego ID użytkownika w bazie. Poproś o weryfikację konta.")
+                        st.error("Brak ID użytkownika w bazie – upewnij się, że jesteś zalogowany.")
                     else:
-                        with st.spinner("Przetwarzanie i sprawdzanie duplikatów..."):
-                            n_firm, n_osob, n_int = importuj_kontakty_ze_spreadsheeta(
+                        with st.spinner("Przetwarzanie kontaktów i zapisywanie metryk..."):
+                            n_firm, n_osob, n_int = importuj_kontakty_i_statystyki_csv(
                                 df_upload, 
                                 st.session_state.zalogowany_uzytkownik_id
                             )
-                        st.success(
-                            f"Import zakończony! Nowe firmy: {n_firm}, nowe osoby kontaktowe: {n_osob}, nowe powiązania projektowe: {n_int}."
-                        )
+                        
+                        # Reset uploadera (czyści podgląd i plik z UI)
+                        st.session_state.uploader_key += 1
+                        st.success(f"Pomyślnie zaimportowano! Firmy: +{n_firm}, Kontakty: +{n_osob}, Współprace: +{n_int}. Metryki projektu zaktualizowane.")
                         st.rerun()
 
         except Exception as e:
-            st.error(f"Błąd przetwarzania pliku: {e}")
+            st.error(f"Błąd przetwarzania pliku CSV: {e}")
