@@ -327,7 +327,7 @@ def importuj_kontakty_ze_spreadsheeta(df_dane, id_uzytkownika):
         status = str(row.get('Status', 'Sukces')).strip() if pd.notna(row.get('Status')) else "Sukces"
         komentarz = str(row.get('Komentarz', f"Zaimportowano z arkusza dla projektu {projekt}")).strip()
 
-        # 1. Sprawdzenie / Dodanie Firmy
+        # 1. sprawdzenie / dodanie firmy
         cursor.execute("SELECT id FROM Firma WHERE LOWER(nazwa) = LOWER(%s)", (nazwa_firmy,))
         firma_res = cursor.fetchone()
         
@@ -426,7 +426,7 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika, nazwa_pliku="Mai
     dodane_interakcje = 0
     dzisiaj_str = datetime.today().strftime("%Y-%m-%d")
 
-    # 1. ZAPIS METRYK MAILINGU (jako 1 zbiorczy rekord dla importowanego pliku/kampanii)
+    # 1. ZAPIS METRYK MAILINGU (jako 1 zbiorczy rekord dla importowanego pliku)
     pierwszy_wiersz = df_dane.iloc[0]
     wyslane = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Wysłane maile', 0))
     odpowiedzi = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Odpowiedzi mailowe', 0))
@@ -560,6 +560,7 @@ else:
 
 if st.sidebar.button("🚪 Wyloguj się"):
     st.logout()
+
 
 tab_firmy, tab_dashboard, tab_granty, tab_import = st.tabs([
     "🏢 Baza Firm", 
@@ -759,7 +760,7 @@ with tab_firmy:
 
         csv_dane = df_firmy.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 Eksportuj tę listę do Excela (CSV)", 
+            label="📥 Eksportuj tę listę do CSV", 
             data=csv_dane, 
             file_name=f"baza_firm_{datetime.now().strftime('%Y-%m-%d')}.csv", 
             mime="text/csv"
