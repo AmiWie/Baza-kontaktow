@@ -914,21 +914,34 @@ with tab_dashboard:
 
     with col_m2:
         st.markdown("##### 🤝 Pozyskane współprace wg kanału kontaktu")
-        # Zliczanie bezpośrednio ze statusów "Sukces"
-        if not df_i.empty and 'sposob_kontaktu' in df_i.columns:
-            df_sukcesy = df_i[df_i['status'] == 'Sukces'].copy()
-            df_sukcesy['sposob_kontaktu'] = df_sukcesy['sposob_kontaktu'].apply(normalizuj_sposob_kontaktu)
-            
-            kanaly_counts = df_sukcesy['sposob_kontaktu'].value_counts()
-            
-            # Wymuszenie obecności wszystkich 3 kategorii na wykresie
-            kategorie_bazowe = pd.Series({"Mail": 0, "Telefon": 0, "Osobisty kontakt": 0})
-            kanaly_pelne = kanaly_counts.combine(kategorie_bazowe, max, fill_value=0)
-            
-            st.bar_chart(kanaly_pelne)
-        else:
-            st.caption("Brak danych o sposobie kontaktu.")  
+        
+        dane_wykresu = None
 
+        # Źródło 1: Bezpośrednio z podsumowania pliku CSV (tabela ProjektStatystyki)
+        if not df_stat.empty:
+            suma_mail = int(df_stat['wspolprace_mail'].sum())
+            suma_tel = int(df_stat['wspolprace_telefon'].sum())
+            suma_osob = int(df_stat['wspolprace_osobiscie'].sum())
+
+            if (suma_mail + suma_tel + suma_osob) > 0:
+                dane_wykresu = pd.DataFrame({
+                    "Liczba": [suma_mail, suma_tel, suma_osob]
+                }, index=["Mail", "Telefon", "Osobisty kontakt"])
+
+        # Źródło 2: Zliczanie z indywidualnych wierszy tabeli Interakcja
+        if dane_wykresu is None and not df_i.empty and 'sposob_kontaktu' in df_i.columns:
+            df_sukcesy = df_i[df_i['status'] == 'Sukces'].copy()
+            if not df_sukcesy.empty:
+                df_sukcesy['sposob_kontaktu'] = df_sukcesy['sposob_kontaktu'].apply(normalizuj_sposob_kontaktu)
+                kanaly_counts = df_sukcesy['sposob_kontaktu'].value_counts()
+                kategorie_bazowe = pd.Series({"Mail": 0, "Telefon": 0, "Osobisty kontakt": 0})
+                kanaly_pelne = kanaly_counts.combine(kategorie_bazowe, max, fill_value=0)
+                dane_wykresu = pd.DataFrame({"Liczba": kanaly_pelne})
+
+        if dane_wykresu is not None:
+            st.bar_chart(dane_wykresu)
+        else:
+            st.caption("Brak danych o współpracach. Wgraj plik CSV lub dodaj interakcję.")
 
 # ZAKŁADKA 3: granty i dofinansowania
 with tab_granty:
@@ -1172,7 +1185,7 @@ with tab_import:
                 st.error(f"Brakuje wymaganych kolumn w pliku CSV: `{', '.join(brakujace)}`")
             else:
                 st.info(f"Wykryto **{len(df_upload)}** wierszy do przetworzenia.")
-                if st.button("🚀 Rozpocznij import danych", type="primary"):
+                if st.button("Importuj dane", type="primary"):
                     if st.session_state.zalogowany_uzytkownik_id is None:
                         st.error("Brak ID użytkownika w bazie – upewnij się, że jesteś zalogowany.")
                     else:
