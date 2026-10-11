@@ -191,6 +191,12 @@ def pobierz_statystyki_dashboard():
     zwolnij_polaczenie(conn)
     return df_f, df_i
 
+@st.cache_data(ttl=15)
+def pobierz_metryki_projektow():
+    conn = pobierz_polaczenie()
+    df = pd.read_sql_query("SELECT * FROM ProjektStatystyki", conn)
+    zwolnij_polaczenie(conn)
+    return df
 
 
 # operacje zapisu z clear cache
@@ -290,6 +296,215 @@ def aktualizuj_grant(id_grantu, nowy_status, nowy_link):
     zwolnij_polaczenie(conn)
     st.cache_data.clear()
 
+def importuj_kontakty_ze_spreadsheeta(df_dane, id_uzytkownika):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    
+    dodane_firmy = 0
+    dodane_osoby = 0
+    dodane_interakcje = 0
+
+    dzisiaj_str = datetime.today().strftime("%Y-%m-%d")
+
+    for _, row in df_dane.iterrows():
+        nazwa_firmy = str(row.get('Nazwa firmy', '')).strip()
+        if not nazwa_firmy or nazwa_firmy.lower() == 'nan':
+            continue
+
+        kategoria = str(row.get('Kategoria', 'Inna')).strip()
+        if not kategoria or kategoria.lower() == 'nan':
+            kategoria = 'Inna'
+
+        projekt = str(row.get('Projekt', '')).strip()
+        if not projekt or projekt.lower() == 'nan':
+            projekt = "Brak projektu"
+
+        imie = str(row.get('Imię', '')).strip() if pd.notna(row.get('Imię')) else ""
+        nazwisko = str(row.get('Nazwisko', '')).strip() if pd.notna(row.get('Nazwisko')) else ""
+        email = str(row.get('Email', '')).strip() if pd.notna(row.get('Email')) else ""
+        telefon = str(row.get('Telefon', '')).strip() if pd.notna(row.get('Telefon')) else ""
+        
+        status = str(row.get('Status', 'Sukces')).strip() if pd.notna(row.get('Status')) else "Sukces"
+        komentarz = str(row.get('Komentarz', f"Zaimportowano z arkusza dla projektu {projekt}")).strip()
+
+        # 1. Sprawdzenie / Dodanie Firmy
+        cursor.execute("SELECT id FROM Firma WHERE LOWER(nazwa) = LOWER(%s)", (nazwa_firmy,))
+        firma_res = cursor.fetchone()
+        
+        if firma_res:
+            firma_id = firma_res[0]
+        else:
+            cursor.execute(
+                "INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s) RETURNING id",
+                (nazwa_firmy, kategoria)
+            )
+            firma_id = cursor.fetchone()[0]
+            dodane_firmy += 1
+
+        # 2. Sprawdzenie / Dodanie Osoby Kontaktowej
+        if imie or nazwisko or email:
+            cursor.execute("""
+                SELECT ok.id 
+                FROM OsobaKontaktowa ok
+                JOIN FirmaOsobaKontaktowa fok ON ok.id = fok.osoba_id
+                WHERE fok.firma_id = %s 
+                  AND (
+                    (LOWER(ok.email) = LOWER(%s) AND %s <> '')
+                    OR (LOWER(ok.imie) = LOWER(%s) AND LOWER(ok.nazwisko) = LOWER(%s))
+                  )
+            """, (firma_id, email, email, imie, nazwisko))
+            
+            osoba_res = cursor.fetchone()
+            
+            if not osoba_res:
+                cursor.execute("""
+                    INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) 
+                    VALUES (%s, %s, %s, %s) RETURNING id
+                """, (imie, nazwisko, email, telefon))
+                osoba_id = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) 
+                    VALUES (%s, %s) ON CONFLICT DO NOTHING
+                """, (firma_id, osoba_id))
+                dodane_osoby += 1
+
+        # 3. Dołączenie do współpracy danego projektu
+        cursor.execute("""
+            SELECT id FROM Interakcja 
+            WHERE id_firmy = %s AND projekt = %s
+        """, (firma_id, projekt))
+        interakcja_res = cursor.fetchone()
+
+        if not interakcja_res:
+            cursor.execute("""
+                INSERT INTO Interakcja (id_firmy, id_uzytkownika, data_interakcji, status, komentarz, projekt)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (firma_id, id_uzytkownika, dzisiaj_str, status, komentarz, projekt))
+            dodane_interakcje += 1
+
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+    
+    return dodane_firmy, dodane_osoby, dodane_interakcje
+
+def parsuj_liczbe(val):
+    if pd.isna(val):
+        return 0
+    try:
+        czysty = str(val).replace('%', '').strip()
+        return int(float(czysty))
+    except (ValueError, TypeError):
+        return 0
+
+def parsuj_procent(val):
+    if pd.isna(val):
+        return 0.0
+    try:
+        czysty = str(val).replace('%', '').replace(',', '.').strip()
+        return float(czysty)
+    except (ValueError, TypeError):
+        return 0.0
+
+def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
+    conn = pobierz_polaczenie()
+    cursor = conn.cursor()
+    
+    dodane_firmy = 0
+    dodane_osoby = 0
+    dodane_interakcje = 0
+    dzisiaj_str = datetime.today().strftime("%Y-%m-%d")
+
+    # 1. Zapis zbiorczych statystyk projektów (agregacja unikalnych projektów)
+    unikalne_projekty = df_dane['Projekt'].dropna().unique()
+    for proj in unikalne_projekty:
+        df_proj = df_dane[df_dane['Projekt'] == proj]
+        pierwszy_wiersz = df_proj.iloc[0]
+
+        wyslane = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Wysłane maile', 0))
+        odpowiedzi = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Odpowiedzi mailowe', 0))
+        rr = parsuj_procent(pierwszy_wiersz.get('Statystyka: Response Rate', 0.0))
+        w_mail = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Współprace z maila', 0))
+        w_tel = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Współprace z telefonu', 0))
+        w_osob = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Współprace osobiście', 0))
+
+        # UPSERT w PostgreSQL
+        cursor.execute("""
+            INSERT INTO ProjektStatystyki (
+                projekt, wyslane_maile, odpowiedzi_mailowe, response_rate,
+                wspolprace_mail, wspolprace_telefon, wspolprace_osobiscie, ostatnia_aktualizacja
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (projekt) DO UPDATE SET
+                wyslane_maile = EXCLUDED.wyslane_maile,
+                odpowiedzi_mailowe = EXCLUDED.odpowiedzi_mailowe,
+                response_rate = EXCLUDED.response_rate,
+                wspolprace_mail = EXCLUDED.wspolprace_mail,
+                wspolprace_telefon = EXCLUDED.wspolprace_telefon,
+                wspolprace_osobiscie = EXCLUDED.wspolprace_osobiscie,
+                ostatnia_aktualizacja = CURRENT_TIMESTAMP;
+        """, (proj, wyslane, odpowiedzi, rr, w_mail, w_tel, w_osob))
+
+    # 2. Rejestracja firm, osób i interakcji
+    for _, row in df_dane.iterrows():
+        nazwa_firmy = str(row.get('Nazwa firmy', '')).strip()
+        if not nazwa_firmy or nazwa_firmy.lower() == 'nan':
+            continue
+
+        kategoria = str(row.get('Kategoria', 'Inna')).strip() or 'Inna'
+        projekt = str(row.get('Projekt', '')).strip() or 'Inny'
+        imie = str(row.get('Imię', '')).strip() if pd.notna(row.get('Imię')) else ""
+        nazwisko = str(row.get('Nazwisko', '')).strip() if pd.notna(row.get('Nazwisko')) else ""
+        email = str(row.get('Email', '')).strip() if pd.notna(row.get('Email')) else ""
+        telefon = str(row.get('Telefon', '')).strip() if pd.notna(row.get('Telefon')) else ""
+        status = str(row.get('Status', 'Sukces')).strip() if pd.notna(row.get('Status')) else "Sukces"
+        komentarz = str(row.get('Komentarz', f"Import współprac: {projekt}")).strip()
+        sposob_kontaktu = str(row.get('Sposób nawiązania kontaktu', 'Mail')).strip() or 'Mail'
+
+        # Firma
+        cursor.execute("SELECT id FROM Firma WHERE LOWER(nazwa) = LOWER(%s)", (nazwa_firmy,))
+        firma_res = cursor.fetchone()
+        if firma_res:
+            firma_id = firma_res[0]
+        else:
+            cursor.execute("INSERT INTO Firma (nazwa, kategoria) VALUES (%s, %s) RETURNING id", (nazwa_firmy, kategoria))
+            firma_id = cursor.fetchone()[0]
+            dodane_firmy += 1
+
+        # Osoba kontaktowa
+        if imie or nazwisko or email:
+            cursor.execute("""
+                SELECT ok.id FROM OsobaKontaktowa ok
+                JOIN FirmaOsobaKontaktowa fok ON ok.id = fok.osoba_id
+                WHERE fok.firma_id = %s AND (
+                    (LOWER(ok.email) = LOWER(%s) AND %s <> '')
+                    OR (LOWER(ok.imie) = LOWER(%s) AND LOWER(ok.nazwisko) = LOWER(%s))
+                )
+            """, (firma_id, email, email, imie, nazwisko))
+            osoba_res = cursor.fetchone()
+
+            if not osoba_res:
+                cursor.execute("""
+                    INSERT INTO OsobaKontaktowa (imie, nazwisko, email, telefon) 
+                    VALUES (%s, %s, %s, %s) RETURNING id
+                """, (imie, nazwisko, email, telefon))
+                osoba_id = cursor.fetchone()[0]
+                cursor.execute("INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (firma_id, osoba_id))
+                dodane_osoby += 1
+
+        # Interakcja z uwzględnieniem sposobu kontaktu
+        cursor.execute("SELECT id FROM Interakcja WHERE id_firmy = %s AND projekt = %s", (firma_id, projekt))
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO Interakcja (id_firmy, id_uzytkownika, data_interakcji, status, komentarz, projekt, sposob_kontaktu)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (firma_id, id_uzytkownika, dzisiaj_str, status, komentarz, projekt, sposob_kontaktu))
+            dodane_interakcje += 1
+
+    conn.commit()
+    zwolnij_polaczenie(conn)
+    st.cache_data.clear()
+    return dodane_firmy, dodane_osoby, dodane_interakcje
 
 
 # Interfejs użytkownika
@@ -328,7 +543,8 @@ else:
 if st.sidebar.button("🚪 Wyloguj się"):
     st.logout()
 
-tab_firmy, tab_dashboard, tab_granty = st.tabs([
+tab_firmy, tab_dashboard, tab_granty, tab_import = st.tabs([
+    "Import danych",
     "🏢 Baza Firm", 
     "📊 Dashboard", 
     "📜 Granty & Dofinansowania"
@@ -596,13 +812,17 @@ with tab_firmy:
 with tab_dashboard:
     st.header("Analiza Kontaktów i Współpracy")
     df_f, df_i = pobierz_statystyki_dashboard()
+    df_stat = pobierz_metryki_projektow()
     
+    # 1. Główne KPI
     kpi1, kpi2, kpi3 = st.columns(3)
     kpi1.metric("Wszystkie firmy w bazie", len(df_f))
     kpi2.metric("Pozyskane współprace", len(df_i[df_i['status'] == 'Sukces']))
     kpi3.metric("Interakcje", len(df_i))
     
     st.divider()
+    
+    # 2. Statystyki ogólne (Firmy i statusy)
     col_chart1, col_chart2 = st.columns(2)
     
     with col_chart1:
@@ -629,6 +849,42 @@ with tab_dashboard:
         st.subheader("📈 Efektywność kontaktu")
         if not df_i.empty: 
             st.bar_chart(df_i['status'].value_counts())
+
+    st.divider()
+
+    # 3. Metryki projektowe i mailingowe z importu CSV
+    st.subheader("📬 Efektywność mailingu i kanałów pozyskiwania")
+
+    if not df_stat.empty:
+        total_wyslane = df_stat['wyslane_maile'].sum()
+        total_odpowiedzi = df_stat['odpowiedzi_mailowe'].sum()
+        sredni_rr = (total_odpowiedzi / total_wyslane * 100) if total_wyslane > 0 else 0.0
+
+        col_m1, col_m2 = st.columns(2)
+
+        with col_m1:
+            st.markdown("##### 📩 Skuteczność mailingu (Wysłane vs Odpowiedzi)")
+            st.metric("Łączny Response Rate", f"{sredni_rr:.1f}%", f"{total_odpowiedzi} odpowiedzi z {total_wyslane} wysłanych")
+            
+            df_mail_chart = pd.DataFrame({
+                "Kategoria": ["Wysłane maile", "Uzyskane odpowiedzi"],
+                "Liczba": [total_wyslane, total_odpowiedzi]
+            }).set_index("Kategoria")
+            st.bar_chart(df_mail_chart)
+
+        with col_m2:
+            st.markdown("##### 🤝 Pozyskane współprace wg kanału kontaktu")
+            suma_mail = df_stat['wspolprace_mail'].sum()
+            suma_tel = df_stat['wspolprace_telefon'].sum()
+            suma_osob = df_stat['wspolprace_osobiscie'].sum()
+
+            df_kanaly = pd.DataFrame({
+                "Kanał": ["E-mail", "Telefon", "Osobiście"],
+                "Współprace": [suma_mail, suma_tel, suma_osob]
+            }).set_index("Kanał")
+            st.bar_chart(df_kanaly)
+    else:
+        st.info("Brak zagregowanych danych o mailingu. Wgraj plik CSV w zakładce importu, aby wygenerować wykresy.")
 
 
 
@@ -816,3 +1072,66 @@ with tab_granty:
                     st.rerun()
                 else:
                     st.error("Nazwa, instytucja oraz projekt są polami wymaganymi!")
+
+# zakładka 4 import z arkusza
+with tab_import:
+    st.header("📥 Masowy import kontaktów i współprac")
+    st.write("Wgraj arkusz `.xlsx` lub `.csv` z danymi kontaktowymi.")
+
+    # Szablon do pobrania
+    szablon_df = pd.DataFrame([{
+        "Nazwa firmy": "Przykładowa Firma Sp. z o.o.",
+        "Kategoria": "Sponsor",
+        "Projekt": "Inżynier na Medal 2026",
+        "Imię": "Jan",
+        "Nazwisko": "Kowalski",
+        "Email": "jan.kowalski@firma.pl",
+        "Telefon": "+48 123 456 789",
+        "Status": "Sukces",
+        "Komentarz": "Współpraca potwierdzona"
+    }])
+    csv_szablon = szablon_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button(
+        label="📄 Pobierz wzorcowy szablon CSV",
+        data=csv_szablon,
+        file_name="szablon_importu_kontaktow.csv",
+        mime="text/csv"
+    )
+
+    st.divider()
+
+    uploaded_file = st.file_uploader("Wybierz plik z kontaktami:", type=["xlsx", "csv"])
+
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df_upload = pd.read_csv(uploaded_file)
+            else:
+                df_upload = pd.read_excel(uploaded_file)
+
+            st.write("### Podgląd wczytanych danych:")
+            st.dataframe(df_upload.head(10), use_container_width=True)
+
+            wymagane_kolumny = {"Nazwa firmy", "Projekt"}
+            brakujace = wymagane_kolumny - set(df_upload.columns)
+
+            if brakujace:
+                st.error(f"Brakuje wymaganych kolumn w arkuszu: `{', '.join(brakujace)}`")
+            else:
+                st.info(f"Wykryto **{len(df_upload)}** wierszy do przetworzenia.")
+                if st.button("🚀 Rozpocznij import danych", type="primary"):
+                    if st.session_state.zalogowany_uzytkownik_id is None:
+                        st.error("Brak przypisanego ID użytkownika w bazie. Poproś o weryfikację konta.")
+                    else:
+                        with st.spinner("Przetwarzanie i sprawdzanie duplikatów..."):
+                            n_firm, n_osob, n_int = importuj_kontakty_ze_spreadsheeta(
+                                df_upload, 
+                                st.session_state.zalogowany_uzytkownik_id
+                            )
+                        st.success(
+                            f"Import zakończony! Nowe firmy: {n_firm}, nowe osoby kontaktowe: {n_osob}, nowe powiązania projektowe: {n_int}."
+                        )
+                        st.rerun()
+
+        except Exception as e:
+            st.error(f"Błąd przetwarzania pliku: {e}")
