@@ -407,10 +407,17 @@ def parsuj_procent(val):
     except (ValueError, TypeError):
         return 0.0
 
-def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
-    # Standaryzacja nazw kolumn (usuwamy zbędne spacje z nagłówków)
+def normalizuj_sposob_kontaktu(wartosc):
+    tekst = str(wartosc).strip() if pd.notna(wartosc) else "Mail"
+    tekst_lower = tekst.lower()
+    if "tel" in tekst_lower:
+        return "Telefon"
+    elif "osob" in tekst_lower:
+        return "Osobisty kontakt"
+    return "Mail"
+
+def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika, nazwa_pliku="Mailing"):
     df_dane.columns = df_dane.columns.str.strip()
-    
     conn = pobierz_polaczenie()
     cursor = conn.cursor()
     
@@ -419,36 +426,36 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
     dodane_interakcje = 0
     dzisiaj_str = datetime.today().strftime("%Y-%m-%d")
 
-    # 1. Zapis zbiorczych statystyk projektów
-    if 'Projekt' in df_dane.columns:
-        unikalne_projekty = df_dane['Projekt'].dropna().unique()
-        for proj in unikalne_projekty:
-            df_proj = df_dane[df_dane['Projekt'] == proj]
-            wiersz = df_proj.iloc[0]
+    # 1. ZAPIS METRYK MAILINGU (jako 1 zbiorczy rekord dla importowanego pliku/kampanii)
+    pierwszy_wiersz = df_dane.iloc[0]
+    wyslane = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Wysłane maile', 0))
+    odpowiedzi = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Odpowiedzi mailowe', 0))
+    rr = parsuj_procent(pierwszy_wiersz.get('Statystyka: Response Rate', 0.0))
+    
+    # Odczyt zgodny z kolumnami z pliku CSV:
+    w_mail = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Mail', 0))
+    w_tel = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Telefon', 0))
+    w_osob = parsuj_liczbe(pierwszy_wiersz.get('Statystyka: Osobisty kontakt', 0))
 
-            wyslane = parsuj_liczbe(wiersz.get('Statystyka: Wysłane maile', 0))
-            odpowiedzi = parsuj_liczbe(wiersz.get('Statystyka: Odpowiedzi mailowe', 0))
-            rr = parsuj_procent(wiersz.get('Statystyka: Response Rate', 0.0))
-            w_mail = parsuj_liczbe(wiersz.get('Statystyka: Współprace z maila', 0))
-            w_tel = parsuj_liczbe(wiersz.get('Statystyka: Współprace z telefonu', 0))
-            w_osob = parsuj_liczbe(wiersz.get('Statystyka: Współprace osobiście', 0))
+    # Czyścimy nazwę kampanii z rozszerzenia pliku
+    id_kampanii = nazwa_pliku.replace(".csv", "").strip()
 
-            cursor.execute("""
-                INSERT INTO ProjektStatystyki (
-                    projekt, wyslane_maile, odpowiedzi_mailowe, response_rate,
-                    wspolprace_mail, wspolprace_telefon, wspolprace_osobiscie, ostatnia_aktualizacja
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (projekt) DO UPDATE SET
-                    wyslane_maile = EXCLUDED.wyslane_maile,
-                    odpowiedzi_mailowe = EXCLUDED.odpowiedzi_mailowe,
-                    response_rate = EXCLUDED.response_rate,
-                    wspolprace_mail = EXCLUDED.wspolprace_mail,
-                    wspolprace_telefon = EXCLUDED.wspolprace_telefon,
-                    wspolprace_osobiscie = EXCLUDED.wspolprace_osobiscie,
-                    ostatnia_aktualizacja = CURRENT_TIMESTAMP;
-            """, (str(proj).strip(), wyslane, odpowiedzi, rr, w_mail, w_tel, w_osob))
+    cursor.execute("""
+        INSERT INTO ProjektStatystyki (
+            projekt, wyslane_maile, odpowiedzi_mailowe, response_rate,
+            wspolprace_mail, wspolprace_telefon, wspolprace_osobiscie, ostatnia_aktualizacja
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (projekt) DO UPDATE SET
+            wyslane_maile = EXCLUDED.wyslane_maile,
+            odpowiedzi_mailowe = EXCLUDED.odpowiedzi_mailowe,
+            response_rate = EXCLUDED.response_rate,
+            wspolprace_mail = EXCLUDED.wspolprace_mail,
+            wspolprace_telefon = EXCLUDED.wspolprace_telefon,
+            wspolprace_osobiscie = EXCLUDED.wspolprace_osobiscie,
+            ostatnia_aktualizacja = CURRENT_TIMESTAMP;
+    """, (id_kampanii, wyslane, odpowiedzi, rr, w_mail, w_tel, w_osob))
 
-    # 2. Rejestracja firm, osób i interakcji
+    # 2. REJESTRACJA FIRM, KONTAKTÓW I INTERAKCJI
     for _, row in df_dane.iterrows():
         nazwa_firmy = str(row.get('Nazwa firmy', '')).strip()
         if not nazwa_firmy or nazwa_firmy.lower() == 'nan':
@@ -461,11 +468,15 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
         email = str(row.get('Email', '')).strip() if pd.notna(row.get('Email')) else ""
         telefon = str(row.get('Telefon', '')).strip() if pd.notna(row.get('Telefon')) else ""
         status = str(row.get('Status', 'Sukces')).strip() if pd.notna(row.get('Status')) else "Sukces"
-        komentarz = str(row.get('Komentarz', f"Import współprac: {projekt}")).strip()
-        sposob_kontaktu = str(row.get('Sposób nawiązania kontaktu', 'Mail')).strip() or 'Mail'
+        
+        komentarz = str(row.get('Komentarz', '')).strip()
+        if not komentarz or komentarz.lower() == 'nan':
+            komentarz = f"Współpraca przy projekcie {projekt}"
 
-        # Firma
-        cursor.execute("SELECT id FROM Firma WHERE LOWER(nazwa) = LOWER(%s)", (nazwa_firmy,))
+        sposob_kontaktu = normalizuj_sposob_kontaktu(row.get('Sposób nawiązania kontaktu', 'Mail'))
+
+        # KROK A: Pobranie istniejącej firmy lub dodanie nowej
+        cursor.execute("SELECT id FROM Firma WHERE LOWER(TRIM(nazwa)) = LOWER(TRIM(%s))", (nazwa_firmy,))
         firma_res = cursor.fetchone()
         if firma_res:
             firma_id = firma_res[0]
@@ -474,14 +485,14 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
             firma_id = cursor.fetchone()[0]
             dodane_firmy += 1
 
-        # Osoba kontaktowa
+        # KROK B: Dodanie osoby kontaktowej (jeśli nie istnieje w relacji z tą firmą)
         if imie or nazwisko or email:
             cursor.execute("""
                 SELECT ok.id FROM OsobaKontaktowa ok
                 JOIN FirmaOsobaKontaktowa fok ON ok.id = fok.osoba_id
                 WHERE fok.firma_id = %s AND (
-                    (LOWER(ok.email) = LOWER(%s) AND %s <> '')
-                    OR (LOWER(ok.imie) = LOWER(%s) AND LOWER(ok.nazwisko) = LOWER(%s))
+                    (LOWER(TRIM(ok.email)) = LOWER(TRIM(%s)) AND %s <> '')
+                    OR (LOWER(TRIM(ok.imie)) = LOWER(TRIM(%s)) AND LOWER(TRIM(ok.nazwisko)) = LOWER(TRIM(%s)))
                 )
             """, (firma_id, email, email, imie, nazwisko))
             osoba_res = cursor.fetchone()
@@ -495,8 +506,13 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
                 cursor.execute("INSERT INTO FirmaOsobaKontaktowa (firma_id, osoba_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (firma_id, osoba_id))
                 dodane_osoby += 1
 
-        # Interakcja
-        cursor.execute("SELECT id FROM Interakcja WHERE id_firmy = %s AND projekt = %s", (firma_id, projekt))
+        # KROK C: DOPISANIE INTERAKCJI DO FIRMY
+        # Sprawdzamy jedynie, czy dokładnie ten sam wpis nie został już dodany dzisiaj (zapobiega dublom przy ponownym kliknięciu)
+        cursor.execute("""
+            SELECT id FROM Interakcja 
+            WHERE id_firmy = %s AND projekt = %s AND komentarz = %s AND data_interakcji = %s
+        """, (firma_id, projekt, komentarz, dzisiaj_str))
+        
         if not cursor.fetchone():
             cursor.execute("""
                 INSERT INTO Interakcja (id_firmy, id_uzytkownika, data_interakcji, status, komentarz, projekt, sposob_kontaktu)
@@ -506,7 +522,7 @@ def importuj_kontakty_i_statystyki_csv(df_dane, id_uzytkownika):
 
     conn.commit()
     zwolnij_polaczenie(conn)
-    st.cache_data.clear()  # Czyści pamięć podręczną wszystkich dashboardów i tabel
+    st.cache_data.clear()
     return dodane_firmy, dodane_osoby, dodane_interakcje
 
 # Interfejs użytkownika
@@ -852,7 +868,8 @@ with tab_dashboard:
                 title="Kategorie", 
                 loc="center left", 
                 bbox_to_anchor=(1, 0, 0.5, 1),
-                frameon=False
+                frameon=False,
+                labelcolor='MARKER'
             )
             
             fig.patch.set_alpha(0.0)
@@ -867,39 +884,42 @@ with tab_dashboard:
     st.divider()
 
     # 3. Metryki projektowe i mailingowe z importu CSV
-    st.subheader("📬 Efektywność mailingu i kanałów pozyskiwania")
+    st.subheader("📩 Efektywność mailingu i kanałów kontaktu")
 
-    if not df_stat.empty:
-        total_wyslane = df_stat['wyslane_maile'].sum()
-        total_odpowiedzi = df_stat['odpowiedzi_mailowe'].sum()
-        sredni_rr = (total_odpowiedzi / total_wyslane * 100) if total_wyslane > 0 else 0.0
+    col_m1, col_m2 = st.columns(2)
 
-        col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        st.markdown("##### Skuteczność mailingu")
+        if not df_stat.empty:
+            total_wyslane = int(df_stat['wyslane_maile'].sum())
+            total_odpowiedzi = int(df_stat['odpowiedzi_mailowe'].sum())
+            sredni_rr = (total_odpowiedzi / total_wyslane * 100) if total_wyslane > 0 else 0.0
 
-        with col_m1:
-            st.markdown("##### 📩 Skuteczność mailingu (Wysłane vs Odpowiedzi)")
             st.metric("Łączny Response Rate", f"{sredni_rr:.1f}%", f"{total_odpowiedzi} odpowiedzi z {total_wyslane} wysłanych")
             
             df_mail_chart = pd.DataFrame({
-                "Kategoria": ["Wysłane maile", "Uzyskane odpowiedzi"],
                 "Liczba": [total_wyslane, total_odpowiedzi]
-            }).set_index("Kategoria")
+            }, index=["Wysłane maile", "Uzyskane odpowiedzi"])
             st.bar_chart(df_mail_chart)
+        else:
+            st.info("Brak zagregowanych danych o mailingu z pliku CSV.")
 
-        with col_m2:
-            st.markdown("##### 🤝 Pozyskane współprace wg kanału kontaktu")
-            suma_mail = df_stat['wspolprace_mail'].sum()
-            suma_tel = df_stat['wspolprace_telefon'].sum()
-            suma_osob = df_stat['wspolprace_osobiscie'].sum()
-
-            df_kanaly = pd.DataFrame({
-                "Kanał": ["E-mail", "Telefon", "Osobiście"],
-                "Współprace": [suma_mail, suma_tel, suma_osob]
-            }).set_index("Kanał")
-            st.bar_chart(df_kanaly)
-    else:
-        st.info("Brak zagregowanych danych o mailingu. Wgraj plik CSV w zakładce importu, aby wygenerować wykresy.")
-
+    with col_m2:
+        st.markdown("##### 🤝 Pozyskane współprace wg kanału kontaktu")
+        # Zliczanie bezpośrednio ze statusów "Sukces"
+        if not df_i.empty and 'sposob_kontaktu' in df_i.columns:
+            df_sukcesy = df_i[df_i['status'] == 'Sukces'].copy()
+            df_sukcesy['sposob_kontaktu'] = df_sukcesy['sposob_kontaktu'].apply(normalizuj_sposob_kontaktu)
+            
+            kanaly_counts = df_sukcesy['sposob_kontaktu'].value_counts()
+            
+            # Wymuszenie obecności wszystkich 3 kategorii na wykresie
+            kategorie_bazowe = pd.Series({"Mail": 0, "Telefon": 0, "Osobisty kontakt": 0})
+            kanaly_pelne = kanaly_counts.combine(kategorie_bazowe, max, fill_value=0)
+            
+            st.bar_chart(kanaly_pelne)
+        else:
+            st.caption("Brak danych o sposobie kontaktu.")  
 
 
 # ZAKŁADKA 3: granty i dofinansowania
@@ -1151,12 +1171,12 @@ with tab_import:
                         with st.spinner("Przetwarzanie kontaktów i zapisywanie metryk..."):
                             n_firm, n_osob, n_int = importuj_kontakty_i_statystyki_csv(
                                 df_upload, 
-                                st.session_state.zalogowany_uzytkownik_id
+                                st.session_state.zalogowany_uzytkownik_id,
+                                nazwa_pliku=uploaded_file.name
                             )
-                        
-                        # Reset uploadera (czyści podgląd i plik z UI)
+
                         st.session_state.uploader_key += 1
-                        st.success(f"Pomyślnie zaimportowano! Firmy: +{n_firm}, Kontakty: +{n_osob}, Współprace: +{n_int}. Metryki projektu zaktualizowane.")
+                        st.success(f"Pomyślnie zaimportowano! Nowe firmy: +{n_firm}, Kontakty: +{n_osob}, Nowe interakcje: +{n_int}.")
                         st.rerun()
 
         except Exception as e:
