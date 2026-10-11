@@ -544,10 +544,10 @@ if st.sidebar.button("🚪 Wyloguj się"):
     st.logout()
 
 tab_firmy, tab_dashboard, tab_granty, tab_import = st.tabs([
-    "Import danych",
     "🏢 Baza Firm", 
     "📊 Dashboard", 
-    "📜 Granty & Dofinansowania"
+    "📜 Granty & Dofinansowania",
+    "Import danych"
 ])
 
 
