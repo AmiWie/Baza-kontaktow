@@ -861,16 +861,24 @@ with tab_dashboard:
             )
             
             # Dodanie czytelnej legendy z nazwami kategorii i liczbą firm
+            # Kolor tekstu dopasowany do motywu Streamlita
+            is_dark = st.get_option("theme.base") == "dark"
+            kolor_tekstu = "white" if is_dark else "#1F2937"
+
             legend_labels = [f"{kat} ({ilosc})" for kat, ilosc in zip(kat_counts.index, kat_counts.values)]
-            ax.legend(
+            leg = ax.legend(
                 wedges, 
                 legend_labels, 
                 title="Kategorie", 
                 loc="center left", 
                 bbox_to_anchor=(1, 0, 0.5, 1),
-                frameon=False,
-                labelcolor='MARKER'
+                frameon=False
             )
+
+            # Wymuszenie koloru tekstu dla tytułu oraz etykiet legendy
+            leg.get_title().set_color(kolor_tekstu)
+            for text in leg.get_texts():
+                text.set_color(kolor_tekstu)
             
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
